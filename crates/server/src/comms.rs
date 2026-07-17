@@ -1,0 +1,345 @@
+//! The comms thread: owns the serial `Session`, polls realtime frames,
+//! evaluates indicators, writes the datalog, and broadcasts JSON messages.
+//!
+//! Everything blocking lives here on a plain OS thread; the async side talks
+//! to it through a command channel and a tokio broadcast of pre-serialized
+//! JSON strings.
+
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use datalog::MslWriter;
+use ecu_proto::{ProtoError, SerialTransport, Session};
+use serde::Serialize;
+use tokio::sync::broadcast;
+use ts_ini::{IniDef, SymbolSource, Telemetry, Value};
+
+use crate::definition::Defaults;
+
+pub enum Cmd {
+    StartLog {
+        path: PathBuf,
+        reply: mpsc::Sender<Result<PathBuf, String>>,
+    },
+    StopLog {
+        reply: mpsc::Sender<Option<LogSummary>>,
+    },
+    Shutdown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogSummary {
+    pub path: PathBuf,
+    pub rows: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LogStatus {
+    pub path: String,
+    pub rows: u64,
+}
+
+/// Connection status snapshot, shared with the async side and serialized
+/// into `{"type":"status",...}` broadcasts.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    pub connected: bool,
+    pub port: Option<String>,
+    pub mode: Option<String>,
+    pub baud: Option<u32>,
+    pub frames: u64,
+    pub crc_errors: u64,
+    pub timeouts: u64,
+    pub last_error: Option<String>,
+    pub log: Option<LogStatus>,
+}
+
+pub struct CommsHandle {
+    pub cmd_tx: mpsc::Sender<Cmd>,
+    pub join: JoinHandle<()>,
+}
+
+pub struct CommsCtx {
+    pub def: Arc<IniDef>,
+    pub defaults: Arc<Defaults>,
+    pub status: Arc<Mutex<Status>>,
+    pub events: broadcast::Sender<String>,
+    pub poll_interval: Duration,
+}
+
+pub fn status_message(status: &Status) -> String {
+    #[derive(Serialize)]
+    struct Msg<'a> {
+        r#type: &'static str,
+        #[serde(flatten)]
+        status: &'a Status,
+    }
+    serde_json::to_string(&Msg {
+        r#type: "status",
+        status,
+    })
+    .expect("status serializes")
+}
+
+fn broadcast_status(ctx: &CommsCtx) {
+    let msg = status_message(&ctx.status.lock().unwrap());
+    let _ = ctx.events.send(msg);
+}
+
+/// Identifier fallback for derived channels and indicator conditions:
+/// `timeNow` plus `[DefaultValues]` (for tune constants like `stoich`).
+struct Extra<'a> {
+    defaults: &'a Defaults,
+    t: f64,
+}
+
+impl SymbolSource for Extra<'_> {
+    fn value(&self, name: &str) -> Option<Value> {
+        if name == "timeNow" {
+            return Some(Value::Num(self.t));
+        }
+        self.defaults.value(name)
+    }
+}
+
+fn round6(v: f64) -> f64 {
+    (v * 1e6).round() / 1e6
+}
+
+/// Decode every output channel and indicator into one frame message; also
+/// returns the numeric channel values for datalog columns.
+fn build_frame(
+    ctx: &CommsCtx,
+    block: &[u8],
+    t: f64,
+    log_rows: Option<u64>,
+) -> (String, std::collections::HashMap<String, f64>) {
+    let extra = Extra {
+        defaults: &ctx.defaults,
+        t,
+    };
+    let telemetry = Telemetry::with_extra(&ctx.def, block, &extra);
+
+    let mut channels = serde_json::Map::with_capacity(ctx.def.output_channels.len());
+    let mut numeric = std::collections::HashMap::with_capacity(ctx.def.output_channels.len());
+    for name in ctx.def.output_channels.keys() {
+        match telemetry.channel(name) {
+            Some(Value::Num(n)) if n.is_finite() => {
+                numeric.insert(name.clone(), n);
+                channels.insert(name.clone(), serde_json::json!(round6(n)));
+            }
+            Some(Value::Str(s)) => {
+                channels.insert(name.clone(), serde_json::json!(s));
+            }
+            _ => {} // undecodable this frame (e.g. depends on tune data)
+        }
+    }
+
+    let indicators: Vec<bool> = ctx
+        .def
+        .front_page
+        .indicators
+        .iter()
+        .map(|ind| match ind.condition.eval(&telemetry) {
+            Ok(Value::Num(n)) => n != 0.0,
+            _ => false,
+        })
+        .collect();
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Frame<'a> {
+        r#type: &'static str,
+        t: f64,
+        channels: &'a serde_json::Map<String, serde_json::Value>,
+        indicators: &'a [bool],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        log_rows: Option<u64>,
+    }
+    let json = serde_json::to_string(&Frame {
+        r#type: "frame",
+        t: round6(t),
+        channels: &channels,
+        indicators: &indicators,
+        log_rows,
+    })
+    .expect("frame serializes");
+    (json, numeric)
+}
+
+/// After this many consecutive unanswered polls the status shows an error
+/// (polling continues — the ECU may come back after a power cycle).
+const SILENT_POLLS_BEFORE_ERROR: u32 = 3;
+
+pub fn spawn(
+    session: Session<SerialTransport>,
+    ctx: CommsCtx,
+    delay_after_open: Option<Duration>,
+) -> CommsHandle {
+    let (cmd_tx, cmd_rx) = mpsc::channel();
+    let join = std::thread::Builder::new()
+        .name("comms".into())
+        .spawn(move || run(session, ctx, cmd_rx, delay_after_open))
+        .expect("spawn comms thread");
+    CommsHandle { cmd_tx, join }
+}
+
+fn run(
+    mut session: Session<SerialTransport>,
+    ctx: CommsCtx,
+    cmd_rx: mpsc::Receiver<Cmd>,
+    delay_after_open: Option<Duration>,
+) {
+    // Boards that reset on port open (DTR) need a beat before the first
+    // command; the INI's delayAfterPortOpen.
+    if let Some(delay) = delay_after_open {
+        std::thread::sleep(delay);
+    }
+
+    let start = Instant::now();
+    let mut log: Option<MslWriter> = None;
+    let mut consecutive_timeouts = 0u32;
+    let mut next_poll = Instant::now();
+
+    loop {
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            match cmd {
+                Cmd::Shutdown => {
+                    finish_log(&ctx, &mut log);
+                    let mut status = ctx.status.lock().unwrap();
+                    status.connected = false;
+                    status.log = None;
+                    drop(status);
+                    broadcast_status(&ctx);
+                    return;
+                }
+                Cmd::StartLog { path, reply } => {
+                    let result = start_log(&ctx, &path);
+                    match result {
+                        Ok(writer) => {
+                            ctx.status.lock().unwrap().log = Some(LogStatus {
+                                path: path.display().to_string(),
+                                rows: 0,
+                            });
+                            log = Some(writer);
+                            let _ = reply.send(Ok(path));
+                        }
+                        Err(e) => {
+                            let _ = reply.send(Err(e.to_string()));
+                        }
+                    }
+                    broadcast_status(&ctx);
+                }
+                Cmd::StopLog { reply } => {
+                    let summary = finish_log(&ctx, &mut log);
+                    let _ = reply.send(summary);
+                    broadcast_status(&ctx);
+                }
+            }
+        }
+
+        let now = Instant::now();
+        if now < next_poll {
+            std::thread::sleep((next_poll - now).min(Duration::from_millis(20)));
+            continue;
+        }
+        // Keep cadence, but never schedule into the past after a stall.
+        next_poll = (next_poll + ctx.poll_interval).max(now);
+
+        match session.read_realtime() {
+            Ok(block) => {
+                let had_error = consecutive_timeouts >= SILENT_POLLS_BEFORE_ERROR;
+                consecutive_timeouts = 0;
+                let t = start.elapsed().as_secs_f64();
+                let (json, numeric) = build_frame(&ctx, &block, t, log.as_ref().map(|w| w.rows()));
+
+                if let Some(writer) = &mut log {
+                    let row: Vec<Option<f64>> = writer
+                        .columns()
+                        .iter()
+                        .map(|c| numeric.get(&c.channel).copied())
+                        .collect();
+                    if let Err(e) = writer.write_row(&row) {
+                        tracing::error!("datalog write failed: {e}");
+                        ctx.status.lock().unwrap().last_error =
+                            Some(format!("datalog write failed: {e}"));
+                        finish_log(&ctx, &mut log);
+                        broadcast_status(&ctx);
+                    }
+                }
+
+                {
+                    let mut status = ctx.status.lock().unwrap();
+                    status.frames += 1;
+                    if let (Some(ls), Some(writer)) = (&mut status.log, &log) {
+                        ls.rows = writer.rows();
+                    }
+                    if had_error {
+                        status.last_error = None;
+                    }
+                }
+                if had_error {
+                    broadcast_status(&ctx); // recovered
+                }
+                let _ = ctx.events.send(json);
+            }
+            Err(ProtoError::CrcMismatch) => {
+                ctx.status.lock().unwrap().crc_errors += 1;
+            }
+            Err(ProtoError::Timeout) => {
+                consecutive_timeouts += 1;
+                let mut status = ctx.status.lock().unwrap();
+                status.timeouts += 1;
+                if consecutive_timeouts == SILENT_POLLS_BEFORE_ERROR {
+                    status.last_error = Some("ECU not responding".into());
+                    drop(status);
+                    broadcast_status(&ctx);
+                }
+            }
+            Err(e) => {
+                // Io/EcuError: treat the connection as gone.
+                tracing::error!("comms error, disconnecting: {e}");
+                finish_log(&ctx, &mut log);
+                let mut status = ctx.status.lock().unwrap();
+                status.connected = false;
+                status.log = None;
+                status.last_error = Some(e.to_string());
+                drop(status);
+                broadcast_status(&ctx);
+                return;
+            }
+        }
+    }
+}
+
+fn start_log(ctx: &CommsCtx, path: &std::path::Path) -> std::io::Result<MslWriter> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let columns = datalog::columns(&ctx.def, ctx.defaults.as_ref());
+    let title = format!(
+        "\"rustytune {}\" log, {}",
+        env!("CARGO_PKG_VERSION"),
+        ctx.def.signature
+    );
+    MslWriter::create(path, &title, columns)
+}
+
+fn finish_log(ctx: &CommsCtx, log: &mut Option<MslWriter>) -> Option<LogSummary> {
+    let writer = log.take()?;
+    ctx.status.lock().unwrap().log = None;
+    let rows = writer.rows();
+    match writer.finish() {
+        Ok(path) => Some(LogSummary { path, rows }),
+        Err(e) => {
+            tracing::error!("closing datalog failed: {e}");
+            None
+        }
+    }
+}

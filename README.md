@@ -8,7 +8,10 @@ One Rust binary owns the ECU serial port and serves a browser UI on
 `127.0.0.1`. Run it on the laptop next to the car over USB serial, or (later)
 headless on an in-car Raspberry Pi and tune from any device on its network.
 
-**Status: early scaffold.** Nothing tunes anything yet.
+**Status: realtime dashboard works.** Connect over USB (primary) or SER3
+(secondary), watch the INI-defined front-page gauges and indicators live in
+the browser, and record MegaLogViewer `.msl` datalogs. Table editing and
+burn are next.
 
 ## Architecture
 

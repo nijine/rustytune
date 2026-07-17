@@ -1,27 +1,16 @@
 //! rustytune server binary.
 //!
-//! Owns the ECU serial port (from Phase 2 on) and serves the browser UI:
-//! the Vite-built frontend is embedded into this binary at compile time, so
-//! a release build is a single self-contained executable. Binds loopback
-//! only; opening it up to a LAN (in-car Pi deployment) is a later phase that
+//! Owns the ECU serial port and serves the browser UI: the Vite-built
+//! frontend is embedded into this binary at compile time, so a release
+//! build is a single self-contained executable. Binds loopback only;
+//! opening it up to a LAN (in-car Pi deployment) is a later phase that
 //! adds pairing/auth first.
 
+use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 
-use axum::{
-    Json, Router,
-    http::{StatusCode, Uri, header},
-    response::{IntoResponse, Response},
-    routing::get,
-};
 use clap::Parser;
-use rust_embed::RustEmbed;
-
-/// Frontend build output (`npm run build` in web/). Run the web build before
-/// `cargo build`, or you'll be serving an empty page.
-#[derive(RustEmbed)]
-#[folder = "../../web/dist"]
-struct Assets;
 
 #[derive(Parser)]
 #[command(name = "rustytune", version, about = "Speeduino tuning server")]
@@ -37,6 +26,18 @@ struct Args {
     /// Don't open the browser after startup
     #[arg(long)]
     no_open: bool,
+
+    /// ECU definition INI (default: the embedded Speeduino 202405-dev INI)
+    #[arg(long)]
+    ini: Option<PathBuf>,
+
+    /// INI symbol to define, repeatable (e.g. --symbol CELSIUS)
+    #[arg(long = "symbol")]
+    symbols: Vec<String>,
+
+    /// Directory for .msl datalogs
+    #[arg(long, default_value = "logs")]
+    log_dir: PathBuf,
 }
 
 #[tokio::main]
@@ -49,9 +50,30 @@ async fn main() -> std::io::Result<()> {
 
     let args = Args::parse();
 
-    let app = Router::new()
-        .route("/api/health", get(health))
-        .fallback(static_assets);
+    let ini_src = match &args.ini {
+        Some(path) => std::fs::read_to_string(path)?,
+        None => rustytune_server::EMBEDDED_INI.to_string(),
+    };
+    let symbols: HashSet<String> = args.symbols.iter().cloned().collect();
+    let def = match ts_ini::parse_with_symbols(&ini_src, &symbols) {
+        Ok(def) => def,
+        Err(e) => {
+            eprintln!("failed to parse ECU definition: {e}");
+            std::process::exit(1);
+        }
+    };
+    for warning in &def.warnings {
+        tracing::warn!("ini: {warning}");
+    }
+    tracing::info!(
+        "definition: {} ({} channels, {} gauges)",
+        def.signature,
+        def.output_channels.len(),
+        def.gauges.len()
+    );
+
+    let state = rustytune_server::build_state(def, args.log_dir);
+    let app = rustytune_server::app(state);
 
     let addr = SocketAddr::new(args.bind, args.port);
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -68,36 +90,6 @@ async fn main() -> std::io::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "name": "rustytune",
-        "version": env!("CARGO_PKG_VERSION"),
-    }))
-}
-
-/// Serve the embedded frontend; unknown extensionless paths fall back to
-/// index.html so client-side routes survive a page reload.
-async fn static_assets(uri: Uri) -> Response {
-    let path = uri.path().trim_start_matches('/');
-    let path = if path.is_empty() { "index.html" } else { path };
-
-    let asset = Assets::get(path).or_else(|| {
-        if path.contains('.') {
-            None
-        } else {
-            Assets::get("index.html")
-        }
-    });
-
-    match asset {
-        Some(content) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
-        }
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
-    }
 }
 
 async fn shutdown_signal() {

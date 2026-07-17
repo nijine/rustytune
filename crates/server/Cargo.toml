@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 description = "rustytune server: owns the ECU serial port, serves the web UI and API"
 
+[lib]
+name = "rustytune_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rustytune"
 path = "src/main.rs"
@@ -14,9 +18,10 @@ ecu-proto = { path = "../ecu-proto" }
 tune-model = { path = "../tune-model" }
 datalog = { path = "../datalog" }
 
-axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
 clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
 rust-embed = "8"
 mime_guess = "2"
 open = "5"
@@ -24,3 +29,8 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
