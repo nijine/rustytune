@@ -2,19 +2,31 @@
 """Fake Speeduino ECU for developing rustytune without hardware.
 
 Vendored from ../speeduino-fake-ecu (the standalone project) and extended:
-primary mode now also answers the INI's real telemetry command — an
-enveloped 'r' och read — in addition to the legacy bare 'A', and incoming
-envelope CRCs are validated (bad requests are dropped, like the firmware).
+primary mode speaks the enveloped Protocol 3 command set of the 202405-dev
+firmware (verified against speeduino/speeduino comms.cpp, whose dispatch is
+identical from 202402.3 through 202501.7):
 
-By default it creates a pty and a symlink to it (./fakeecu), then answers
-telemetry polls on it:
+  'A'            legacy realtime block
+  'r'            och realtime read ('r' + canId + 0x30 + off(LE16) + cnt(LE16))
+  'p'            page read  ('p' + canId + page + off(LE16) + cnt(LE16))
+  'M'            page chunk write (same header + value bytes)
+  'b'/'B'        burn page to "EEPROM" -> replies SERIAL_RC_BURN_OK (0x04)
+  'd'            page CRC32 -> 0x00 + CRC32 big-endian
+  'Q'            code version ("speeduino 202405-dev")
+  'S'            product string ("Speeduino 2024.05-dev")
+  'C'            comms test -> 0x00 0xFF
+  'f'            capabilities -> proto version + blocking factors (BE16)
 
-  secondary mode: 'r' + canId + 0x30 + offset(LE16) + count(LE16)
-                  -> 'r' + 0x30 + <count raw och bytes>
-  primary mode:   len(BE16) + payload + CRC32(BE32) where payload is
-                  'A'                                   (legacy realtime)
-                  'r' + canId + 0x30 + off(LE16) + count(LE16)
-                  -> len(BE16) + 0x00 + <data> + CRC32(BE32)
+Incoming envelope CRCs are validated (bad requests are dropped, like the
+firmware). Out-of-range page reads/writes reply SERIAL_RC_RANGE_ERR (0x84),
+unknown commands SERIAL_RC_UKWN_ERR (0x83).
+
+Pages hold a deterministic default pattern (byte i of page n, 1-based, is
+(n * 31 + i) & 0xFF). 'M' writes hit the working copy; 'b' copies the page
+to the burned set and — with --storage PATH — persists it to disk, so burns
+survive a simulator restart exactly like EEPROM.
+
+Secondary mode is unchanged: raw 'r'/0x30 telemetry only, no checksum.
 
 Telemetry values sweep smoothly by default so gauges visibly move; use
 --static for the fixed reference values checked by the test suite. Channel
@@ -22,6 +34,7 @@ offsets match the Speeduino modern-layout defaults (rustytune's fixture INI).
 """
 
 import argparse
+import json
 import math
 import os
 import pty
@@ -44,6 +57,34 @@ OCH_OFFSETS = {  # keep in sync with fixtures/speeduino202405_dev.ini
     "tps": 25,
 }
 
+# fixtures/speeduino202405_dev.ini pageSize list (pages 1..15).
+PAGE_SIZES = [128, 288, 288, 128, 288, 128, 240, 384, 192, 192, 288, 192, 128, 288, 256]
+
+SIGNATURE = b"speeduino 202405-dev"       # 'Q' response, matches INI signature
+PRODUCT_STRING = b"Speeduino 2024.05-dev"  # 'S' response
+BLOCKING_FACTOR = 251
+TABLE_BLOCKING_FACTOR = 256
+
+RC_OK = 0x00
+RC_BURN_OK = 0x04
+RC_UKWN_ERR = 0x83
+RC_RANGE_ERR = 0x84
+
+# Payload length constraints per command, for envelope resync: (min, max).
+CMD_LENGTHS = {
+    ord("A"): (1, 1),
+    ord("r"): (7, 7),
+    ord("p"): (7, 7),
+    ord("M"): (8, 7 + BLOCKING_FACTOR),
+    ord("b"): (3, 3),
+    ord("B"): (3, 3),
+    ord("d"): (3, 3),
+    ord("Q"): (1, 1),
+    ord("S"): (1, 1),
+    ord("C"): (1, 1),
+    ord("f"): (1, 1),
+}
+
 BAUD_CONSTANTS = {
     9600: termios.B9600,
     19200: termios.B19200,
@@ -52,6 +93,61 @@ BAUD_CONSTANTS = {
     115200: termios.B115200,
     230400: termios.B230400,
 }
+
+
+def default_page(page_num):
+    """Deterministic default content for 1-based page `page_num`."""
+    size = PAGE_SIZES[page_num - 1]
+    return bytearray((page_num * 31 + i) & 0xFF for i in range(size))
+
+
+class PageStore:
+    """Working ("RAM") and burned ("EEPROM") copies of every tune page.
+
+    Burned pages persist to --storage as JSON hex; on startup the working
+    copy is initialized from the burned state, like a real power-on.
+    """
+
+    def __init__(self, storage_path):
+        self.storage_path = storage_path
+        self.burned = {n: default_page(n) for n in range(1, len(PAGE_SIZES) + 1)}
+        if storage_path and os.path.exists(storage_path):
+            with open(storage_path) as f:
+                saved = json.load(f)
+            for key, hexdata in saved.get("pages", {}).items():
+                num = int(key)
+                data = bytearray.fromhex(hexdata)
+                if 1 <= num <= len(PAGE_SIZES) and len(data) == PAGE_SIZES[num - 1]:
+                    self.burned[num] = data
+        self.working = {n: bytearray(p) for n, p in self.burned.items()}
+
+    def valid(self, page_num):
+        return 1 <= page_num <= len(PAGE_SIZES)
+
+    def read(self, page_num, offset, count):
+        page = self.working[page_num]
+        if offset + count > len(page):
+            return None
+        return bytes(page[offset : offset + count])
+
+    def write(self, page_num, offset, data):
+        page = self.working[page_num]
+        if offset + len(data) > len(page):
+            return False
+        page[offset : offset + len(data)] = data
+        return True
+
+    def crc(self, page_num):
+        return zlib.crc32(bytes(self.working[page_num]))
+
+    def burn(self, page_num):
+        self.burned[page_num] = bytearray(self.working[page_num])
+        if self.storage_path:
+            doc = {"pages": {str(n): p.hex() for n, p in self.burned.items()}}
+            tmp = self.storage_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(doc, f)
+            os.replace(tmp, self.storage_path)
 
 
 def build_payload(och_size, t, static):
@@ -116,19 +212,80 @@ def envelope(body):
     return struct.pack(">H", len(body)) + body + struct.pack(">I", zlib.crc32(body))
 
 
-def handle_primary(buf, och_size, t, static):
+def rc_msg(code):
+    return envelope(bytes([code]))
+
+
+def dispatch(payload, store, och_size, t, static):
+    """One validated envelope payload -> response envelope (or None)."""
+    cmd = payload[0:1]
+
+    if cmd == b"A":
+        return envelope(bytes([RC_OK]) + bytes(build_payload(och_size, t, static)))
+
+    if cmd == b"r":
+        # 'r' + canId + type + offset(LE16) + count(LE16); type 0x30 = och
+        if payload[2] != 0x30:
+            return rc_msg(RC_UKWN_ERR)
+        count = payload[5] | (payload[6] << 8)
+        data = build_payload(och_size, t, static)[:count]
+        return envelope(bytes([RC_OK]) + bytes(data))
+
+    if cmd in (b"p", b"M", b"b", b"B", b"d"):
+        page_num = payload[2]  # payload[1] is canId (unused, like firmware)
+        if not store.valid(page_num):
+            return rc_msg(RC_RANGE_ERR)
+
+        if cmd == b"p":
+            offset = payload[3] | (payload[4] << 8)
+            count = payload[5] | (payload[6] << 8)
+            data = store.read(page_num, offset, count)
+            if data is None:
+                return rc_msg(RC_RANGE_ERR)
+            return envelope(bytes([RC_OK]) + data)
+
+        if cmd == b"M":
+            offset = payload[3] | (payload[4] << 8)
+            count = payload[5] | (payload[6] << 8)
+            values = payload[7:]
+            if count != len(values) or not store.write(page_num, offset, values):
+                return rc_msg(RC_RANGE_ERR)
+            return rc_msg(RC_OK)
+
+        if cmd == b"d":
+            return envelope(bytes([RC_OK]) + struct.pack(">I", store.crc(page_num)))
+
+        # 'b'/'B': firmware acks with BURN_OK, not OK
+        store.burn(page_num)
+        return rc_msg(RC_BURN_OK)
+
+    if cmd == b"Q":
+        return envelope(bytes([RC_OK]) + SIGNATURE)
+    if cmd == b"S":
+        return envelope(bytes([RC_OK]) + PRODUCT_STRING)
+    if cmd == b"C":
+        return envelope(bytes([RC_OK, 0xFF]))
+    if cmd == b"f":
+        return envelope(
+            bytes([RC_OK, 2])
+            + struct.pack(">H", BLOCKING_FACTOR)
+            + struct.pack(">H", TABLE_BLOCKING_FACTOR)
+        )
+
+    return rc_msg(RC_UKWN_ERR)
+
+
+def handle_primary(buf, store, och_size, t, static):
     """Try to consume one enveloped command from buf.
 
     Returns (new_buf, response_bytes_or_None, made_progress).
     """
-    if len(buf) < 2:
+    if len(buf) < 3:
         return buf, None, False
     plen = (buf[0] << 8) | buf[1]
-    known = (plen == 1 and len(buf) >= 3 and buf[2] == 0x41) or (
-        plen == 7 and len(buf) >= 5 and buf[2:3] == b"r" and buf[4] == 0x30
-    )
-    if not known:
-        return buf[1:], None, True  # resync one byte
+    limits = CMD_LENGTHS.get(buf[2])
+    if limits is None or not limits[0] <= plen <= limits[1]:
+        return buf[1:], None, True  # implausible header: resync one byte
     need = 2 + plen + 4
     if len(buf) < need:
         return buf, None, False  # wait for the rest of the frame
@@ -139,11 +296,7 @@ def handle_primary(buf, och_size, t, static):
     if zlib.crc32(payload) != crc_wire:
         return buf, None, True  # bad request CRC: drop, like the firmware
 
-    data = build_payload(och_size, t, static)
-    if payload[0:1] == b"r":
-        count = payload[5] | (payload[6] << 8)
-        data = data[:count]
-    return buf, envelope(bytes([0x00]) + bytes(data)), True
+    return buf, dispatch(payload, store, och_size, t, static), True
 
 
 def main():
@@ -167,12 +320,17 @@ def main():
     parser.add_argument("--static", action="store_true",
                         help="fixed reference values instead of animated sweeps")
     parser.add_argument(
+        "--storage", metavar="PATH",
+        help="persist burned pages to this JSON file (primary mode); burns "
+             "survive restarts like EEPROM")
+    parser.add_argument(
         "--corrupt-every", type=int, metavar="N", default=0,
         help="corrupt one byte of every Nth response (primary mode: provokes "
              "CRC-mismatch drops; secondary mode: silently wrong values, as "
              "that protocol has no checksum)")
     args = parser.parse_args()
 
+    store = PageStore(args.storage)
     fd, cleanup = open_port(args)
     start = time.monotonic()
     deadline = start + args.duration if args.duration > 0 else None
@@ -208,7 +366,7 @@ def main():
                     resp = b"r" + bytes([0x30]) + bytes(payload[:count])
                 else:
                     buf, resp, progressed = handle_primary(
-                        buf, args.och_size, t, args.static)
+                        buf, store, args.och_size, t, args.static)
                     if not progressed:
                         break
                     if resp is None:

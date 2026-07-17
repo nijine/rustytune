@@ -9,11 +9,13 @@
 
 pub mod command;
 pub mod envelope;
+pub mod pages;
 pub mod secondary;
 pub mod session;
 pub mod transport;
 
 pub use command::{Args, Template};
+pub use pages::{PageCommands, PagesConfig, RC_BURN_OK};
 pub use session::{Config, Mode, Session};
 pub use transport::{MockTransport, SerialTransport, Transport};
 
@@ -29,4 +31,8 @@ pub enum ProtoError {
     EcuError(u8),
     #[error("no response from ECU")]
     Timeout,
+    #[error("short response: expected {expected} bytes, got {got}")]
+    ShortResponse { expected: usize, got: usize },
+    #[error("{0}")]
+    Unsupported(&'static str),
 }

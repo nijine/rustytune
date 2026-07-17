@@ -85,16 +85,41 @@ impl<T: Transport> Session<T> {
                 self.transport.write_all(&cmd)?;
                 self.read_secondary(count as usize)
             }
-            Mode::Primary => {
-                self.transport.write_all(&envelope::encode(&cmd))?;
-                let payload = self.read_enveloped()?;
-                Ok(payload[1..].to_vec()) // strip return code
-            }
+            Mode::Primary => self.request(&cmd, &[envelope::RC_OK]),
         }
     }
 
+    /// One enveloped request/response roundtrip (primary serial only).
+    /// `ok` lists the return codes counted as success — burn commands ack
+    /// with RC_BURN_OK (0x04), everything else with RC_OK. Returns the data
+    /// after the return code.
+    pub fn request(&mut self, payload: &[u8], ok: &[u8]) -> Result<Vec<u8>, ProtoError> {
+        if self.config.mode != Mode::Primary {
+            return Err(ProtoError::Unsupported(
+                "enveloped commands need the primary serial (SER3 is telemetry-only)",
+            ));
+        }
+        self.transport.write_all(&envelope::encode(payload))?;
+        let full = self.read_enveloped(ok)?;
+        Ok(full[1..].to_vec()) // strip return code
+    }
+
+    /// Send an ASCII command template (INI `queryCommand`/`versionInfo`,
+    /// e.g. `"Q"`) and decode the response as text.
+    pub fn query_string(&mut self, command_template: &str) -> Result<String, ProtoError> {
+        let cmd = Template::parse(command_template)?.build(&Args {
+            can_id: self.config.can_id,
+            ..Default::default()
+        })?;
+        let data = self.request(&cmd, &[envelope::RC_OK])?;
+        Ok(String::from_utf8_lossy(&data)
+            .trim_end_matches('\0')
+            .trim()
+            .to_string())
+    }
+
     /// Await one enveloped response; returns the payload (return code first).
-    fn read_enveloped(&mut self) -> Result<Vec<u8>, ProtoError> {
+    fn read_enveloped(&mut self, ok: &[u8]) -> Result<Vec<u8>, ProtoError> {
         let deadline = Instant::now() + self.config.response_timeout;
         let mut dec = envelope::Decoder::new();
         let mut chunk = [0u8; 256];
@@ -104,7 +129,7 @@ impl<T: Transport> Session<T> {
                 match dec.push(b) {
                     Some(envelope::Event::Frame(payload)) => {
                         let rc = payload[0];
-                        if rc != envelope::RC_OK {
+                        if !ok.contains(&rc) {
                             return Err(ProtoError::EcuError(rc));
                         }
                         return Ok(payload);

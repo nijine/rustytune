@@ -42,6 +42,7 @@ export interface Status {
   frames: number;
   crcErrors: number;
   timeouts: number;
+  ecuSignature: string | null;
   lastError: string | null;
   log: LogStatus | null;
 }

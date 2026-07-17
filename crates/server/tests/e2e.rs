@@ -146,6 +146,18 @@ async fn browser_workflow() {
     }
     assert!(saw_status, "ws must open with a status snapshot");
 
+    // The comms thread verified the ECU signature against the INI.
+    let status: serde_json::Value = http
+        .get(format!("{base}/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["ecuSignature"], "speeduino 202405-dev");
+    assert_eq!(status["lastError"], serde_json::Value::Null);
+
     // Datalog: start, let some rows accumulate, stop, check the .msl.
     let start: serde_json::Value = http
         .post(format!("{base}/log/start"))

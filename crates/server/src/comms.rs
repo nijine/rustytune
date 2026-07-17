@@ -56,6 +56,8 @@ pub struct Status {
     pub frames: u64,
     pub crc_errors: u64,
     pub timeouts: u64,
+    /// What the ECU answered to the INI's queryCommand (primary mode only).
+    pub ecu_signature: Option<String>,
     pub last_error: Option<String>,
     pub log: Option<LogStatus>,
 }
@@ -200,6 +202,28 @@ fn run(
     // command; the INI's delayAfterPortOpen.
     if let Some(delay) = delay_after_open {
         std::thread::sleep(delay);
+    }
+
+    // Verify we're talking to the firmware this INI describes. A mismatch
+    // is surfaced but not fatal — telemetry offsets may still line up, and
+    // the user may be probing which INI they need.
+    if session.config().mode == ecu_proto::Mode::Primary {
+        match session.query_string(&ctx.def.query_command) {
+            Ok(signature) => {
+                let mut status = ctx.status.lock().unwrap();
+                if signature != ctx.def.signature {
+                    tracing::warn!("ECU signature `{signature}` != INI `{}`", ctx.def.signature);
+                    status.last_error = Some(format!(
+                        "signature mismatch: ECU says `{signature}`, INI is `{}`",
+                        ctx.def.signature
+                    ));
+                }
+                status.ecu_signature = Some(signature);
+                drop(status);
+                broadcast_status(&ctx);
+            }
+            Err(e) => tracing::warn!("signature query failed: {e}"),
+        }
     }
 
     let start = Instant::now();
