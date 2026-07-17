@@ -32,6 +32,14 @@ struct Assets;
 pub const EMBEDDED_INI: &str = include_str!("../../../fixtures/speeduino202405_dev.ini");
 
 pub fn build_state(def: ts_ini::IniDef, log_dir: PathBuf) -> SharedState {
+    build_state_with_symbols(def, Vec::new(), log_dir)
+}
+
+pub fn build_state_with_symbols(
+    def: ts_ini::IniDef,
+    symbols: Vec<String>,
+    log_dir: PathBuf,
+) -> SharedState {
     let defaults = Arc::new(Defaults::from_ini(&def));
     let definition = definition::definition_ui(&def, &defaults);
     // Frame + status events; capacity covers a couple seconds of frames for
@@ -47,6 +55,8 @@ pub fn build_state(def: ts_ini::IniDef, log_dir: PathBuf) -> SharedState {
         comms: Mutex::new(None),
         tune: Arc::new(Mutex::new(tune_model::Tune::new(def))),
         writer: Mutex::new(None),
+        msq: Mutex::new(None),
+        symbols,
         log_dir,
     })
 }
@@ -67,6 +77,10 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/tune/constants", get(api::tune_constants))
         .route("/api/tune/constant/{name}", post(api::tune_set_constant))
         .route("/api/tune/burn", post(api::tune_burn))
+        .route("/api/msq", post(api::msq_upload))
+        .route("/api/msq/diff", get(api::msq_diff))
+        .route("/api/msq/apply", post(api::msq_apply))
+        .route("/api/msq/save", get(api::msq_save))
         .route("/api/lock/release", post(api::lock_release))
         .route("/api/ws", get(api::ws))
         .fallback(static_assets)

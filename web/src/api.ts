@@ -43,6 +43,7 @@ export interface Status {
   crcErrors: number;
   timeouts: number;
   ecuSignature: string | null;
+  tuneLoaded: boolean;
   lastError: string | null;
   log: LogStatus | null;
 }
@@ -105,6 +106,43 @@ export interface ConstantJson {
   requiresPowerCycle: boolean;
 }
 
+export interface MsqMeta {
+  filename: string;
+  signature: string | null;
+  signatureMatch: boolean;
+  writeDate: string | null;
+  author: string | null;
+  settings: string[];
+  constants: number;
+}
+
+export interface DiffCell {
+  index: number;
+  row?: number;
+  col?: number;
+  ecu: number | null;
+  file: number | null;
+}
+
+export interface DiffEntryJson {
+  name: string;
+  page: number | null;
+  where: string;
+  kind: "scalar" | "bits" | "array";
+  ecu?: number | string;
+  file?: number | string;
+  changedCount?: number;
+  len?: number;
+  cells?: DiffCell[];
+}
+
+export interface MsqDiffJson {
+  meta: MsqMeta;
+  entries: DiffEntryJson[];
+  onlyInFile: string[];
+  unresolved: [string, string][];
+}
+
 /// Stable per-browser id for the single-writer tuning lock.
 export function clientId(): string {
   let id = localStorage.getItem("rustytune-client-id");
@@ -156,4 +194,11 @@ export const api = {
   setConstant: (name: string, value: number) =>
     post<ConstantJson>(`/api/tune/constant/${name}`, { value }),
   burn: () => post<{ burnedPages: number[] }>("/api/tune/burn"),
+  msqUpload: (filename: string, content: string) =>
+    post<MsqMeta>("/api/msq", { filename, content }),
+  msqDiff: () => request<MsqDiffJson>("/api/msq/diff"),
+  msqApply: (names?: string[]) =>
+    post<{ applied: number; skipped: [string, string][] }>("/api/msq/apply", {
+      names: names ?? null,
+    }),
 };

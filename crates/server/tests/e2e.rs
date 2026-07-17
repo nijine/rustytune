@@ -276,6 +276,97 @@ async fn browser_workflow() {
         .unwrap();
     assert_eq!(tune["burnPending"], false);
 
+    // .msq upload: the real TunerStudio file (202501) against the 202405-dev
+    // definition — diff still works name-wise, mismatch is surfaced.
+    let msq_content =
+        tune_model::msq::decode_latin1(include_bytes!("../../../fixtures/CurrentTune.msq"));
+    let meta: serde_json::Value = http
+        .post(format!("{base}/msq"))
+        .json(&serde_json::json!({ "filename": "CurrentTune.msq", "content": msq_content }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(meta["signature"], "speeduino 202501");
+    assert_eq!(meta["signatureMatch"], false);
+
+    let diff: serde_json::Value = http
+        .get(format!("{base}/msq/diff"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = diff["entries"].as_array().unwrap();
+    assert!(
+        !entries.is_empty(),
+        "pattern pages must differ from a real tune"
+    );
+    let ve = entries
+        .iter()
+        .find(|e| e["name"] == "veTable")
+        .expect("veTable differs");
+    assert_eq!(ve["where"], "VE Table");
+    assert!(ve["cells"][0]["row"].is_number(), "2D cells carry row/col");
+
+    // Selective apply: push just reqFuel (7.9 in the file) to the ECU.
+    let report: serde_json::Value = http
+        .post(format!("{base}/msq/apply"))
+        .header("X-Client-Id", "client-a")
+        .json(&serde_json::json!({ "names": ["reqFuel"] }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(report["applied"], 1, "{report}");
+    let constants: serde_json::Value = http
+        .get(format!("{base}/tune/constants?names=reqFuel"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(constants[0]["value"], 7.9);
+    // reqFuel no longer appears in the diff.
+    let diff: serde_json::Value = http
+        .get(format!("{base}/msq/diff"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        diff["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["name"] != "reqFuel"),
+        "applied constant must drop out of the diff"
+    );
+
+    // Save: the ECU state serializes as a .msq with our signature.
+    let saved = http.get(format!("{base}/msq/save")).send().await.unwrap();
+    assert!(saved.status().is_success());
+    let disposition = saved
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(disposition.contains(".msq"), "{disposition}");
+    let body = saved.text().await.unwrap();
+    assert!(body.contains("signature=\"speeduino 202405-dev\""));
+    let reparsed = tune_model::msq::parse(&body).unwrap();
+    assert!(reparsed.constants.len() > 500);
+
     // Datalog: start, let some rows accumulate, stop, check the .msl.
     let start: serde_json::Value = http
         .post(format!("{base}/log/start"))

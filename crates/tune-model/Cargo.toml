@@ -7,3 +7,5 @@ description = "Tune page buffers, typed constant/table views, dirty tracking, .m
 [dependencies]
 ts-ini = { path = "../ts-ini" }
 thiserror.workspace = true
+quick-xml = "0.37"
+indexmap.workspace = true

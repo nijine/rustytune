@@ -12,6 +12,8 @@
 //! `fuelLoadBins` scale is `{fuelLoadRes}`), so the tune itself is the
 //! expression symbol source.
 
+pub mod msq;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,6 +21,8 @@ use ts_ini::{
     ConstantClass, ConstantDef, DataType, IniDef, OutputChannel, Shape, SymbolSource, TableDef,
     Value,
 };
+
+pub use msq::{ApplyReport, DiffEntry, DiffKind, MsqDiff, MsqFile, MsqValue};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TuneError {
@@ -241,7 +245,11 @@ impl Tune {
         (0..count).map(|i| self.array_element(name, i)).collect()
     }
 
-    fn encode(&self, c: &ConstantDef, user: f64) -> Result<i64, TuneError> {
+    /// `clamp` applies the INI's lo/hi (interactive edits). The msq
+    /// apply/diff paths pass `false`: a saved tune must restore and
+    /// compare byte-faithfully even where values sit outside those UI
+    /// limits.
+    fn encode_impl(&self, c: &ConstantDef, user: f64, clamp: bool) -> Result<i64, TuneError> {
         let eval = |field: &ts_ini::NumOrExpr, what: &str| {
             field
                 .eval(self)
@@ -253,16 +261,17 @@ impl Tune {
             return Err(TuneError::Eval(c.name.clone(), "scale is zero".into()));
         }
         let mut user = user;
-        // Clamp to the INI's lo/hi when present.
-        if let Some(lo) = &c.lo
-            && let Ok(lo) = eval(lo, "lo")
-        {
-            user = user.max(lo);
-        }
-        if let Some(hi) = &c.hi
-            && let Ok(hi) = eval(hi, "hi")
-        {
-            user = user.min(hi);
+        if clamp {
+            if let Some(lo) = &c.lo
+                && let Ok(lo) = eval(lo, "lo")
+            {
+                user = user.max(lo);
+            }
+            if let Some(hi) = &c.hi
+                && let Ok(hi) = eval(hi, "hi")
+            {
+                user = user.min(hi);
+            }
         }
         let raw = (user / scale - translate).round() as i64;
         let (lo, hi) = type_range(c.ty);
@@ -271,6 +280,18 @@ impl Tune {
 
     /// Write a scalar or bits constant into the local page data.
     pub fn set_constant(&mut self, name: &str, user: f64) -> Result<(), TuneError> {
+        self.set_constant_impl(name, user, true)
+    }
+
+    pub(crate) fn set_constant_unclamped(
+        &mut self,
+        name: &str,
+        user: f64,
+    ) -> Result<(), TuneError> {
+        self.set_constant_impl(name, user, false)
+    }
+
+    fn set_constant_impl(&mut self, name: &str, user: f64, clamp: bool) -> Result<(), TuneError> {
         let c = self
             .constant(name)
             .ok_or_else(|| TuneError::UnknownConstant(name.into()))?
@@ -280,7 +301,7 @@ impl Tune {
             .ok_or_else(|| TuneError::NotEditable(name.into(), "not a page constant"))?;
         match c.class {
             ConstantClass::Scalar => {
-                let raw = self.encode(&c, user)?;
+                let raw = self.encode_impl(&c, user, clamp)?;
                 let page = &mut self.pages[page_idx];
                 write_raw(&mut page.data, offset, c.ty, raw);
                 Ok(())
@@ -314,6 +335,25 @@ impl Tune {
         index: usize,
         user: f64,
     ) -> Result<(), TuneError> {
+        self.set_array_element_impl(name, index, user, true)
+    }
+
+    pub(crate) fn set_array_element_unclamped(
+        &mut self,
+        name: &str,
+        index: usize,
+        user: f64,
+    ) -> Result<(), TuneError> {
+        self.set_array_element_impl(name, index, user, false)
+    }
+
+    fn set_array_element_impl(
+        &mut self,
+        name: &str,
+        index: usize,
+        user: f64,
+        clamp: bool,
+    ) -> Result<(), TuneError> {
         let c = self
             .constant(name)
             .ok_or_else(|| TuneError::UnknownConstant(name.into()))?
@@ -332,7 +372,7 @@ impl Tune {
         let (page_idx, offset) = self
             .location(&c)
             .ok_or_else(|| TuneError::NotEditable(name.into(), "not a page constant"))?;
-        let raw = self.encode(&c, user)?;
+        let raw = self.encode_impl(&c, user, clamp)?;
         let page = &mut self.pages[page_idx];
         write_raw(
             &mut page.data,
@@ -345,6 +385,42 @@ impl Tune {
 
     pub fn requires_power_cycle(&self, name: &str) -> bool {
         self.def.requires_power_cycle.iter().any(|n| n == name)
+    }
+
+    // ----- raw access for the msq diff (same crate only) ------------------
+
+    /// Raw field value of a scalar/bits constant (bits: the extracted
+    /// index), for exact comparisons.
+    pub(crate) fn constant_raw(&self, name: &str) -> Option<i64> {
+        let c = self.constant(name)?;
+        let (page_idx, offset) = self.location(c)?;
+        let bytes = &self.pages.get(page_idx)?.data;
+        let raw = read_raw(bytes, offset, c.ty)?;
+        match c.class {
+            ConstantClass::Bits => {
+                let Some(Shape::Bits { lo, hi }) = c.shape else {
+                    return None;
+                };
+                let mask = (1i64 << (hi - lo + 1)) - 1;
+                Some((raw >> lo) & mask)
+            }
+            _ => Some(raw),
+        }
+    }
+
+    pub(crate) fn array_raw(&self, name: &str, index: usize) -> Option<i64> {
+        let c = self.constant(name)?;
+        let (page_idx, offset) = self.location(c)?;
+        let bytes = &self.pages.get(page_idx)?.data;
+        read_raw(bytes, offset + index * c.ty.size() as usize, c.ty)
+    }
+
+    /// Encode a user value for byte-exact msq comparison (no lo/hi clamp).
+    pub(crate) fn encode_user(&self, name: &str, user: f64) -> Result<i64, TuneError> {
+        let c = self
+            .constant(name)
+            .ok_or_else(|| TuneError::UnknownConstant(name.into()))?;
+        self.encode_impl(c, user, false)
     }
 
     // ----- tables ---------------------------------------------------------
@@ -513,10 +589,10 @@ impl SymbolSource for Tune {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests_support {
     use super::*;
 
-    fn fixture() -> Arc<IniDef> {
+    pub fn fixture() -> Arc<IniDef> {
         static DEF: std::sync::OnceLock<Arc<IniDef>> = std::sync::OnceLock::new();
         DEF.get_or_init(|| {
             let src = include_str!("../../../fixtures/speeduino202405_dev.ini");
@@ -526,7 +602,7 @@ mod tests {
     }
 
     /// Pages filled with the fake ECU's deterministic pattern.
-    fn loaded_tune() -> Tune {
+    pub fn loaded_tune() -> Tune {
         let def = fixture();
         let mut tune = Tune::new(def.clone());
         for (idx, &size) in def.header.page_sizes.clone().iter().enumerate() {
@@ -538,6 +614,12 @@ mod tests {
         tune.set_loaded(true);
         tune
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tests_support::loaded_tune;
+    use super::*;
 
     #[test]
     fn ve_table_view_and_edit() {

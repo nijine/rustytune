@@ -72,7 +72,7 @@ async fn main() -> std::io::Result<()> {
         def.gauges.len()
     );
 
-    let state = rustytune_server::build_state(def, args.log_dir);
+    let state = rustytune_server::build_state_with_symbols(def, args.symbols.clone(), args.log_dir);
     let app = rustytune_server::app(state);
 
     let addr = SocketAddr::new(args.bind, args.port);

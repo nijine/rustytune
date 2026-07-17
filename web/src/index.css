@@ -415,3 +415,127 @@ button.burn-needed {
   font-size: 0.75rem;
   margin: 8px 0 0;
 }
+
+/* Tune file / diff view */
+.tunefile {
+  padding-top: 12px;
+}
+
+.file-btn {
+  display: inline-block;
+  font-size: 0.85rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.file-btn input {
+  display: none;
+}
+
+.button-link {
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.msq-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--secondary);
+  padding-bottom: 10px;
+}
+
+.warn-pill {
+  color: #0d0d0d;
+  background: var(--warning);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  align-self: flex-start;
+}
+
+.ok-note {
+  color: var(--good);
+  font-size: 0.9rem;
+}
+
+.diff-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  font-size: 0.85rem;
+  color: var(--secondary);
+}
+
+.diff-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.diff-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.diff-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--grid);
+  vertical-align: top;
+}
+
+.diff-table tr:last-child td {
+  border-bottom: none;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cells-detail {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cell-change {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.diff-extra {
+  padding-top: 10px;
+  font-size: 0.78rem;
+  color: var(--secondary);
+}
+
+.diff-extra summary {
+  cursor: pointer;
+  color: var(--muted);
+}

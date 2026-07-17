@@ -12,7 +12,7 @@ use axum::{
         Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use ecu_proto::{Config, Mode, SerialTransport, Session};
@@ -34,6 +34,10 @@ pub struct AppState {
     pub tune: Arc<Mutex<Tune>>,
     /// Client id holding the tuning write lock (other clients read-only).
     pub writer: Mutex<Option<String>>,
+    /// Uploaded .msq reference file: (filename, parsed).
+    pub msq: Mutex<Option<(String, tune_model::MsqFile)>>,
+    /// Symbols the INI was parsed with (recorded in saved .msq settings).
+    pub symbols: Vec<String>,
     pub log_dir: PathBuf,
 }
 
@@ -571,6 +575,230 @@ pub async fn tune_set_constant(
         Some(c) => Json(c).into_response(),
         None => err(StatusCode::INTERNAL_SERVER_ERROR, "constant vanished").into_response(),
     }
+}
+
+// ----- .msq reference file: upload, diff, selective apply, save -------------
+
+#[derive(Deserialize)]
+pub struct MsqUploadReq {
+    pub filename: String,
+    /// Full file text (client decodes ISO-8859-1 before sending).
+    pub content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MsqMeta {
+    pub filename: String,
+    pub signature: Option<String>,
+    pub signature_match: bool,
+    pub write_date: Option<String>,
+    pub author: Option<String>,
+    pub settings: Vec<String>,
+    pub constants: usize,
+}
+
+fn msq_meta(state: &AppState, filename: &str, file: &tune_model::MsqFile) -> MsqMeta {
+    MsqMeta {
+        filename: filename.to_string(),
+        signature: file.signature.clone(),
+        signature_match: file.signature.as_deref() == Some(state.def.signature.as_str()),
+        write_date: file.write_date.clone(),
+        author: file.author.clone(),
+        settings: file.settings.clone(),
+        constants: file.constants.len(),
+    }
+}
+
+pub async fn msq_upload(
+    State(state): State<SharedState>,
+    Json(req): Json<MsqUploadReq>,
+) -> Response {
+    let file = match tune_model::msq::parse(&req.content) {
+        Ok(file) => file,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    };
+    if file.constants.is_empty() {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "no constants found — not a .msq tune?",
+        )
+        .into_response();
+    }
+    let meta = msq_meta(&state, &req.filename, &file);
+    *state.msq.lock().unwrap() = Some((req.filename, file));
+    Json(meta).into_response()
+}
+
+/// "Where" label for a constant: the table/curve using it, else its page.
+fn where_label(state: &AppState, name: &str, page: Option<u8>) -> String {
+    for table in state.def.tables.values() {
+        let role = if table.z_bins == name {
+            ""
+        } else if table.x_bins.0 == name {
+            " (X axis)"
+        } else if table.y_bins.0 == name {
+            " (Y axis)"
+        } else {
+            continue;
+        };
+        return format!("{}{}", table.title, role);
+    }
+    for curve in state.def.curves.values() {
+        if curve.x_bins.0 == name || curve.y_bins.iter().any(|b| b == name) {
+            return curve.title.clone();
+        }
+    }
+    page.map(|p| format!("page {p}")).unwrap_or_default()
+}
+
+/// Per-cell detail cap: enough to show "where", without shipping whole maps.
+const MAX_DIFF_CELLS: usize = 64;
+
+fn diff_json(state: &AppState, tune: &Tune) -> Result<serde_json::Value, ApiError> {
+    let msq = state.msq.lock().unwrap();
+    let Some((filename, file)) = msq.as_ref() else {
+        return Err(err(StatusCode::CONFLICT, "no .msq uploaded"));
+    };
+    let diff = tune_model::msq::diff(file, tune);
+
+    let mut entries = Vec::new();
+    for entry in &diff.entries {
+        let where_ = where_label(state, &entry.name, entry.page);
+        let base = serde_json::json!({
+            "name": entry.name,
+            "page": entry.page,
+            "where": where_,
+        });
+        let mut obj = base.as_object().unwrap().clone();
+        match &entry.kind {
+            tune_model::DiffKind::Scalar { ecu, file } => {
+                obj.insert("kind".into(), "scalar".into());
+                obj.insert("ecu".into(), serde_json::json!(ecu));
+                obj.insert("file".into(), serde_json::json!(file));
+            }
+            tune_model::DiffKind::Bits { ecu, file } => {
+                obj.insert("kind".into(), "bits".into());
+                obj.insert("ecu".into(), serde_json::json!(ecu));
+                obj.insert("file".into(), serde_json::json!(file));
+            }
+            tune_model::DiffKind::Array { changed, len } => {
+                obj.insert("kind".into(), "array".into());
+                obj.insert("changedCount".into(), serde_json::json!(changed.len()));
+                obj.insert("len".into(), serde_json::json!(len));
+                // Per-element detail with values; 2D shapes get row/col.
+                let ecu_values = tune.array_values(&entry.name).unwrap_or_default();
+                let file_values = match file.constants.get(&entry.name) {
+                    Some(tune_model::MsqValue::Array(v)) => v.clone(),
+                    _ => Vec::new(),
+                };
+                let nx = state
+                    .def
+                    .constants
+                    .get(&entry.name)
+                    .and_then(|c| match c.shape {
+                        Some(ts_ini::Shape::Array2D { x, .. }) => Some(x as usize),
+                        _ => None,
+                    });
+                let cells: Vec<serde_json::Value> = changed
+                    .iter()
+                    .take(MAX_DIFF_CELLS)
+                    .map(|&i| {
+                        let mut cell = serde_json::Map::new();
+                        cell.insert("index".into(), serde_json::json!(i));
+                        if let Some(nx) = nx {
+                            cell.insert("row".into(), serde_json::json!(i / nx));
+                            cell.insert("col".into(), serde_json::json!(i % nx));
+                        }
+                        cell.insert("ecu".into(), serde_json::json!(ecu_values.get(i)));
+                        cell.insert("file".into(), serde_json::json!(file_values.get(i)));
+                        serde_json::Value::Object(cell)
+                    })
+                    .collect();
+                obj.insert("cells".into(), serde_json::Value::Array(cells));
+            }
+        }
+        entries.push(serde_json::Value::Object(obj));
+    }
+
+    Ok(serde_json::json!({
+        "meta": msq_meta(state, filename, file),
+        "entries": entries,
+        "onlyInFile": diff.only_in_file,
+        "unresolved": diff.unresolved,
+    }))
+}
+
+pub async fn msq_diff(State(state): State<SharedState>) -> Response {
+    let tune = state.tune.lock().unwrap();
+    if !tune.loaded() {
+        return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+    }
+    match diff_json(&state, &tune) {
+        Ok(json) => Json(json).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct MsqApplyReq {
+    /// Restrict to these constants (selective send); omit for all.
+    pub names: Option<Vec<String>>,
+}
+
+pub async fn msq_apply(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(req): Json<MsqApplyReq>,
+) -> Response {
+    if let Err(e) = acquire_writer(&state, &headers) {
+        return e.into_response();
+    }
+    let report = {
+        let msq = state.msq.lock().unwrap();
+        let Some((_, file)) = msq.as_ref() else {
+            return err(StatusCode::CONFLICT, "no .msq uploaded").into_response();
+        };
+        let mut tune = state.tune.lock().unwrap();
+        if !tune.loaded() {
+            return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+        }
+        let names: Option<std::collections::HashSet<String>> =
+            req.names.map(|n| n.into_iter().collect());
+        tune_model::msq::apply(file, &mut tune, names.as_ref())
+    };
+    broadcast_tune(&state);
+    Json(serde_json::json!({
+        "applied": report.applied,
+        "skipped": report.skipped,
+    }))
+    .into_response()
+}
+
+pub async fn msq_save(State(state): State<SharedState>) -> Response {
+    let tune = state.tune.lock().unwrap();
+    if !tune.loaded() {
+        return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+    }
+    let now = chrono::Local::now();
+    let content = tune_model::msq::save(
+        &tune,
+        &state.symbols,
+        &format!("rustytune {}", env!("CARGO_PKG_VERSION")),
+        &now.format("%a %b %d %H:%M:%S %Y").to_string(),
+    );
+    let filename = format!("rustytune_{}.msq", now.format("%Y%m%d_%H%M%S"));
+    (
+        [
+            (header::CONTENT_TYPE, "application/xml".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        content,
+    )
+        .into_response()
 }
 
 pub async fn tune_burn(State(state): State<SharedState>, headers: HeaderMap) -> Response {
