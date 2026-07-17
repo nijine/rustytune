@@ -59,6 +59,62 @@ export interface PortInfo {
   usb: boolean;
 }
 
+export interface TableInfo {
+  id: string;
+  title: string;
+}
+
+export interface TuneSummary {
+  loaded: boolean;
+  dirty: boolean;
+  burnPending: boolean;
+  writer: string | null;
+  tables: TableInfo[];
+}
+
+export interface TableJson {
+  id: string;
+  title: string;
+  x: number[];
+  y: number[];
+  z: number[][];
+  zLo: number;
+  zHi: number;
+  zDigits: number;
+  xLabel: string | null;
+  yLabel: string | null;
+  xChannel: string | null;
+  yChannel: string | null;
+}
+
+/// `{"type":"tune"}` WS message: dirty/burn state for all clients.
+export interface TuneState {
+  loaded: boolean;
+  dirty: boolean;
+  burnPending: boolean;
+}
+
+export interface ConstantJson {
+  name: string;
+  value: number | string;
+  units: string | null;
+  digits: number;
+  lo: number | null;
+  hi: number | null;
+  labels: string[];
+  requiresPowerCycle: boolean;
+}
+
+/// Stable per-browser id for the single-writer tuning lock.
+export function clientId(): string {
+  let id = localStorage.getItem("rustytune-client-id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("rustytune-client-id", id);
+  }
+  return id;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, init);
   const body = await resp.json().catch(() => null);
@@ -72,10 +128,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-const post = (path: string, body?: unknown) =>
-  request<unknown>(path, {
+const post = <T = unknown,>(path: string, body?: unknown) =>
+  request<T>(path, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: {
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      "X-Client-Id": clientId(),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
 
@@ -88,4 +147,13 @@ export const api = {
   disconnect: () => post("/api/disconnect"),
   logStart: () => post("/api/log/start"),
   logStop: () => post("/api/log/stop"),
+  tune: () => request<TuneSummary>("/api/tune"),
+  table: (id: string) => request<TableJson>(`/api/tune/table/${id}`),
+  setCells: (id: string, cells: { row: number; col: number; value: number }[]) =>
+    post(`/api/tune/table/${id}/cells`, { cells }),
+  constants: (names: string[]) =>
+    request<ConstantJson[]>(`/api/tune/constants?names=${names.join(",")}`),
+  setConstant: (name: string, value: number) =>
+    post<ConstantJson>(`/api/tune/constant/${name}`, { value }),
+  burn: () => post<{ burnedPages: number[] }>("/api/tune/burn"),
 };

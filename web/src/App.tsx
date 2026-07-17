@@ -4,12 +4,14 @@ import { TelemetryFeed } from "./feed";
 import ConnectBar from "./components/ConnectBar";
 import Gauge from "./components/Gauge";
 import Indicators from "./components/Indicators";
+import TuneView from "./components/TuneView";
 
 export default function App() {
   const feed = useMemo(() => new TelemetryFeed(), []);
   const [definition, setDefinition] = useState<Definition | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"dash" | "tune">("dash");
 
   useEffect(() => {
     api
@@ -35,12 +37,31 @@ export default function App() {
 
       {definition && (
         <main>
-          <Indicators defs={definition.indicators} feed={feed} />
-          <div className="gauges">
-            {definition.gauges.map((g) => (
-              <Gauge key={g.name} def={g} feed={feed} />
-            ))}
-          </div>
+          <nav className="tabs">
+            <button
+              className={tab === "dash" ? "tab active" : "tab"}
+              onClick={() => setTab("dash")}
+            >
+              Dashboard
+            </button>
+            <button
+              className={tab === "tune" ? "tab active" : "tab"}
+              onClick={() => setTab("tune")}
+            >
+              Tuning
+            </button>
+          </nav>
+          {tab === "dash" && (
+            <>
+              <Indicators defs={definition.indicators} feed={feed} />
+              <div className="gauges">
+                {definition.gauges.map((g) => (
+                  <Gauge key={g.name} def={g} feed={feed} />
+                ))}
+              </div>
+            </>
+          )}
+          {tab === "tune" && <TuneView feed={feed} />}
           <footer>
             <span>{definition.signature}</span>
             {status && status.connected && (

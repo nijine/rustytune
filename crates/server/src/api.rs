@@ -9,15 +9,17 @@ use std::time::Duration;
 use axum::{
     Json,
     extract::{
-        State, WebSocketUpgrade,
+        Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use ecu_proto::{Config, Mode, SerialTransport, Session};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
+use ts_ini::Value;
+use tune_model::Tune;
 
 use crate::comms::{self, Cmd, CommsCtx, CommsHandle, Status};
 use crate::definition::{Defaults, DefinitionUi};
@@ -29,6 +31,9 @@ pub struct AppState {
     pub status: Arc<Mutex<Status>>,
     pub events: broadcast::Sender<String>,
     pub comms: Mutex<Option<CommsHandle>>,
+    pub tune: Arc<Mutex<Tune>>,
+    /// Client id holding the tuning write lock (other clients read-only).
+    pub writer: Mutex<Option<String>>,
     pub log_dir: PathBuf,
 }
 
@@ -185,13 +190,25 @@ fn do_connect(state: &SharedState, req: ConnectReq) -> Result<Status, ApiError> 
             ..Status::default()
         };
     }
+    // Fresh tune snapshot and lock for this connection.
+    *state.tune.lock().unwrap() = Tune::new(state.def.clone());
+    *state.writer.lock().unwrap() = None;
 
+    let pages = match mode {
+        Mode::Primary => Some(
+            comms::page_commands(&state.def)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?,
+        ),
+        Mode::Secondary => None,
+    };
     let ctx = CommsCtx {
         def: state.def.clone(),
         defaults: state.defaults.clone(),
         status: state.status.clone(),
         events: state.events.clone(),
         poll_interval: Duration::from_millis(req.poll_ms.clamp(20, 1000)),
+        tune: state.tune.clone(),
+        pages,
     };
     let delay = state
         .def
@@ -310,6 +327,264 @@ async fn handle_ws(mut socket: WebSocket, state: SharedState) {
                 _ => break,
             },
         }
+    }
+}
+
+// ----- tune API -------------------------------------------------------------
+
+fn client_id(headers: &HeaderMap) -> String {
+    headers
+        .get("x-client-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string()
+}
+
+/// First writer takes the lock; everyone else is read-only until release.
+fn acquire_writer(state: &SharedState, headers: &HeaderMap) -> Result<(), ApiError> {
+    let id = client_id(headers);
+    let mut writer = state.writer.lock().unwrap();
+    match writer.as_deref() {
+        None => {
+            *writer = Some(id);
+            Ok(())
+        }
+        Some(current) if current == id => Ok(()),
+        Some(_) => Err(err(
+            StatusCode::LOCKED,
+            "another client holds the tuning lock",
+        )),
+    }
+}
+
+pub async fn lock_release(State(state): State<SharedState>, headers: HeaderMap) -> Response {
+    let id = client_id(&headers);
+    let mut writer = state.writer.lock().unwrap();
+    if writer.as_deref() == Some(id.as_str()) {
+        *writer = None;
+    }
+    Json(serde_json::json!({ "writer": *writer })).into_response()
+}
+
+fn broadcast_tune(state: &SharedState) {
+    let msg = comms::tune_message(&state.tune.lock().unwrap());
+    let _ = state.events.send(msg);
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableInfo {
+    pub id: String,
+    pub title: String,
+}
+
+pub async fn tune_summary(State(state): State<SharedState>) -> Response {
+    let tune = state.tune.lock().unwrap();
+    let tables: Vec<TableInfo> = state
+        .def
+        .tables
+        .iter()
+        .filter(|(id, _)| tune.table(id).is_some())
+        .map(|(id, t)| TableInfo {
+            id: id.clone(),
+            title: t.title.clone(),
+        })
+        .collect();
+    Json(serde_json::json!({
+        "loaded": tune.loaded(),
+        "dirty": tune.any_dirty(),
+        "burnPending": tune.burn_pending(),
+        "writer": *state.writer.lock().unwrap(),
+        "tables": tables,
+    }))
+    .into_response()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TableJson {
+    id: String,
+    title: String,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    z: Vec<Vec<f64>>,
+    z_lo: f64,
+    z_hi: f64,
+    z_digits: u8,
+    x_label: Option<String>,
+    y_label: Option<String>,
+    x_channel: Option<String>,
+    y_channel: Option<String>,
+}
+
+pub async fn tune_table(State(state): State<SharedState>, Path(id): Path<String>) -> Response {
+    let tune = state.tune.lock().unwrap();
+    if !tune.loaded() {
+        return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+    }
+    let Some(def) = state.def.tables.get(&id) else {
+        return err(StatusCode::NOT_FOUND, format!("unknown table `{id}`")).into_response();
+    };
+    let Some(data) = tune.table(&id) else {
+        return err(
+            StatusCode::CONFLICT,
+            format!("table `{id}` does not decode"),
+        )
+        .into_response();
+    };
+    Json(TableJson {
+        id: id.clone(),
+        title: def.title.clone(),
+        x: data.x,
+        y: data.y,
+        z: data.z,
+        z_lo: data.z_lo,
+        z_hi: data.z_hi,
+        z_digits: data.z_digits,
+        x_label: def.xy_labels.first().cloned(),
+        y_label: def.xy_labels.get(1).cloned(),
+        x_channel: def.x_bins.1.clone(),
+        y_channel: def.y_bins.1.clone(),
+    })
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct CellEdit {
+    pub row: usize,
+    pub col: usize,
+    pub value: f64,
+}
+
+#[derive(Deserialize)]
+pub struct CellsReq {
+    pub cells: Vec<CellEdit>,
+}
+
+pub async fn tune_table_cells(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<CellsReq>,
+) -> Response {
+    if let Err(e) = acquire_writer(&state, &headers) {
+        return e.into_response();
+    }
+    {
+        let mut tune = state.tune.lock().unwrap();
+        if !tune.loaded() {
+            return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+        }
+        for cell in &req.cells {
+            if let Err(e) = tune.set_table_cell(&id, cell.row, cell.col, cell.value) {
+                return err(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            }
+        }
+    }
+    broadcast_tune(&state);
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConstantJson {
+    name: String,
+    value: serde_json::Value,
+    units: Option<String>,
+    digits: u8,
+    lo: Option<f64>,
+    hi: Option<f64>,
+    /// Combo labels for bits constants (INVALID entries are hidden).
+    labels: Vec<String>,
+    requires_power_cycle: bool,
+}
+
+fn constant_json(state: &AppState, tune: &Tune, name: &str) -> Option<ConstantJson> {
+    let c = state.def.constants.get(name)?;
+    let value = match tune.constant_value(name)? {
+        Value::Num(n) => serde_json::json!(n),
+        Value::Str(s) => serde_json::json!(s),
+    };
+    Some(ConstantJson {
+        name: name.to_string(),
+        value,
+        units: c.units.as_ref().and_then(|u| u.eval(tune).ok()),
+        digits: c
+            .digits
+            .as_ref()
+            .and_then(|d| d.eval(tune).ok())
+            .unwrap_or(0.0) as u8,
+        lo: c.lo.as_ref().and_then(|v| v.eval(tune).ok()),
+        hi: c.hi.as_ref().and_then(|v| v.eval(tune).ok()),
+        labels: c.labels.clone(),
+        requires_power_cycle: tune.requires_power_cycle(name),
+    })
+}
+
+#[derive(Deserialize)]
+pub struct NamesQuery {
+    pub names: String,
+}
+
+pub async fn tune_constants(
+    State(state): State<SharedState>,
+    Query(query): Query<NamesQuery>,
+) -> Response {
+    let tune = state.tune.lock().unwrap();
+    if !tune.loaded() {
+        return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+    }
+    let list: Vec<ConstantJson> = query
+        .names
+        .split(',')
+        .filter_map(|name| constant_json(&state, &tune, name.trim()))
+        .collect();
+    Json(list).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct SetConstantReq {
+    pub value: f64,
+}
+
+pub async fn tune_set_constant(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SetConstantReq>,
+) -> Response {
+    if let Err(e) = acquire_writer(&state, &headers) {
+        return e.into_response();
+    }
+    let response = {
+        let mut tune = state.tune.lock().unwrap();
+        if !tune.loaded() {
+            return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+        }
+        if let Err(e) = tune.set_constant(&name, req.value) {
+            return err(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+        }
+        constant_json(&state, &tune, &name)
+    };
+    broadcast_tune(&state);
+    match response {
+        Some(c) => Json(c).into_response(),
+        None => err(StatusCode::INTERNAL_SERVER_ERROR, "constant vanished").into_response(),
+    }
+}
+
+pub async fn tune_burn(State(state): State<SharedState>, headers: HeaderMap) -> Response {
+    if let Err(e) = acquire_writer(&state, &headers) {
+        return e.into_response();
+    }
+    let result =
+        tokio::task::spawn_blocking(move || comms_roundtrip(&state, |reply| Cmd::Burn { reply }))
+            .await;
+    match result {
+        Ok(Ok(Ok(pages))) => Json(serde_json::json!({ "burnedPages": pages })).into_response(),
+        Ok(Ok(Err(msg))) => err(StatusCode::INTERNAL_SERVER_ERROR, msg).into_response(),
+        Ok(Err(resp)) => resp.into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 

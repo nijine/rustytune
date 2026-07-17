@@ -185,3 +185,233 @@ footer {
   padding-top: 10px;
   font-variant-numeric: tabular-nums;
 }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 0 0;
+}
+
+.tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  padding: 6px 12px;
+}
+
+.tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+/* Tuning view */
+.tune-view {
+  padding-top: 12px;
+}
+
+.tune-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+}
+
+.pill.sending {
+  font-size: 0.75rem;
+  color: var(--warning);
+  font-variant-numeric: tabular-nums;
+}
+
+button.burn-needed {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: #0d0d0d;
+  font-weight: 600;
+}
+
+.tune-main {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+/* Table editor */
+.table-editor {
+  outline: none;
+  flex: 1 1 640px;
+  max-width: 780px;
+  user-select: none;
+}
+
+.table-flex {
+  display: flex;
+  gap: 4px;
+}
+
+.ylabels {
+  display: flex;
+  flex-direction: column;
+  width: 52px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ylabels > div {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  min-height: 26px;
+}
+
+.ylabels .corner {
+  min-height: 22px;
+  font-size: 0.65rem;
+}
+
+.zwrap {
+  flex: 1;
+  position: relative;
+}
+
+.zgrid {
+  display: grid;
+  gap: 1px;
+  position: relative;
+  background: var(--page);
+}
+
+.cell {
+  min-height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  cursor: cell;
+}
+
+.cell.sel {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.cell.active {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.cell-edit {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  text-align: center;
+  font-size: 0.72rem;
+  background: var(--ink);
+  color: var(--page);
+}
+
+.op-cursor {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--ink);
+  background: rgba(255, 255, 255, 0.25);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition:
+    left 90ms linear,
+    top 90ms linear;
+}
+
+.xlabels {
+  display: grid;
+  gap: 1px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: center;
+  padding-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.axis-label {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.65rem;
+  padding-top: 2px;
+}
+
+.hint {
+  font-size: 0.7rem;
+  padding-top: 6px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.center-note {
+  text-align: center;
+  margin-top: 3rem;
+}
+
+/* Constants panel */
+.constants {
+  flex: 0 0 260px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.constants h3 {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  color: var(--secondary);
+  font-weight: 600;
+}
+
+.constants label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.78rem;
+}
+
+.constants label > span:first-child {
+  flex: 1;
+  color: var(--secondary);
+}
+
+.constants input,
+.constants select {
+  width: 90px;
+  font-size: 0.78rem;
+  padding: 3px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.constants .units {
+  width: 40px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.warn-note {
+  color: var(--warning);
+  font-size: 0.75rem;
+  margin: 8px 0 0;
+}

@@ -1061,6 +1061,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "crc32fast",
  "datalog",
  "ecu-proto",
  "futures-util",

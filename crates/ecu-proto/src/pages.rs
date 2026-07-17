@@ -83,6 +83,10 @@ impl PageCommands {
         self.pages.len()
     }
 
+    pub fn blocking_factor(&self) -> u16 {
+        self.blocking_factor
+    }
+
     pub fn page_size(&self, page_idx: usize) -> Option<u32> {
         self.pages.get(page_idx).map(|p| p.size)
     }

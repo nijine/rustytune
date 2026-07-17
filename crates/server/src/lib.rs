@@ -37,13 +37,16 @@ pub fn build_state(def: ts_ini::IniDef, log_dir: PathBuf) -> SharedState {
     // Frame + status events; capacity covers a couple seconds of frames for
     // a briefly stalled client before it lags.
     let (events, _) = broadcast::channel(64);
+    let def = Arc::new(def);
     Arc::new(AppState {
-        def: Arc::new(def),
+        def: def.clone(),
         defaults,
         definition,
         status: Arc::new(Mutex::new(comms::Status::default())),
         events,
         comms: Mutex::new(None),
+        tune: Arc::new(Mutex::new(tune_model::Tune::new(def))),
+        writer: Mutex::new(None),
         log_dir,
     })
 }
@@ -58,6 +61,13 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/disconnect", post(api::disconnect))
         .route("/api/log/start", post(api::log_start))
         .route("/api/log/stop", post(api::log_stop))
+        .route("/api/tune", get(api::tune_summary))
+        .route("/api/tune/table/{id}", get(api::tune_table))
+        .route("/api/tune/table/{id}/cells", post(api::tune_table_cells))
+        .route("/api/tune/constants", get(api::tune_constants))
+        .route("/api/tune/constant/{name}", post(api::tune_set_constant))
+        .route("/api/tune/burn", post(api::tune_burn))
+        .route("/api/lock/release", post(api::lock_release))
         .route("/api/ws", get(api::ws))
         .fallback(static_assets)
         .with_state(state)

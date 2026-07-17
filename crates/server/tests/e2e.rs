@@ -141,6 +141,7 @@ async fn browser_workflow() {
                 let indicators = value["indicators"].as_array().unwrap();
                 assert_eq!(indicators.len(), n_indicators);
             }
+            Some("tune") => {} // dirty/burn broadcasts ride the same socket
             other => panic!("unexpected message type {other:?}"),
         }
     }
@@ -157,6 +158,123 @@ async fn browser_workflow() {
         .unwrap();
     assert_eq!(status["ecuSignature"], "speeduino 202405-dev");
     assert_eq!(status["lastError"], serde_json::Value::Null);
+
+    // Tune download: poll until every page is in and CRC-verified.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let tune = loop {
+        let tune: serde_json::Value = http
+            .get(format!("{base}/tune"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if tune["loaded"] == true {
+            break tune;
+        }
+        assert!(Instant::now() < deadline, "tune never loaded: {tune}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(tune["dirty"], false);
+    assert_eq!(tune["burnPending"], false);
+
+    // VE table decodes from the fake ECU's pattern pages.
+    let table: serde_json::Value = http
+        .get(format!("{base}/tune/table/veTable1Tbl"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(table["z"].as_array().unwrap().len(), 16);
+    assert_eq!(table["z"][0].as_array().unwrap().len(), 16);
+    // Page 2 pattern: byte i = (2*31 + i) & 0xFF; veTable offset 0,
+    // rpmBins offset 256 at scale 100.
+    assert_eq!(table["z"][0][0], 62.0);
+    assert_eq!(table["x"][0], 6200.0);
+
+    // Client A edits a cell; the writer lock now belongs to A.
+    let resp = http
+        .post(format!("{base}/tune/table/veTable1Tbl/cells"))
+        .header("X-Client-Id", "client-a")
+        .json(&serde_json::json!({ "cells": [{ "row": 0, "col": 0, "value": 75.0 }] }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "{:?}", resp.text().await);
+
+    // Client B is read-only while A holds the lock.
+    let resp = http
+        .post(format!("{base}/tune/table/veTable1Tbl/cells"))
+        .header("X-Client-Id", "client-b")
+        .json(&serde_json::json!({ "cells": [{ "row": 0, "col": 1, "value": 80.0 }] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 423, "second writer must be locked out");
+
+    // The comms thread flushes the edit with M and verifies with d.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let tune: serde_json::Value = http
+            .get(format!("{base}/tune"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if tune["dirty"] == false {
+            assert_eq!(tune["burnPending"], true, "flushed but not burned");
+            break;
+        }
+        assert!(Instant::now() < deadline, "edit never flushed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let status: serde_json::Value = http
+        .get(format!("{base}/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        status["lastError"],
+        serde_json::Value::Null,
+        "write verification must pass"
+    );
+    let table: serde_json::Value = http
+        .get(format!("{base}/tune/table/veTable1Tbl"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(table["z"][0][0], 75.0);
+
+    // Burn commits RAM to "EEPROM" (page index 1).
+    let resp = http
+        .post(format!("{base}/tune/burn"))
+        .header("X-Client-Id", "client-a")
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let burned: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(burned["burnedPages"][0], 1);
+    let tune: serde_json::Value = http
+        .get(format!("{base}/tune"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tune["burnPending"], false);
 
     // Datalog: start, let some rows accumulate, stop, check the .msl.
     let start: serde_json::Value = http
