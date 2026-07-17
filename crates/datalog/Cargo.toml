@@ -1,0 +1,9 @@
+[package]
+name = "datalog"
+version.workspace = true
+edition.workspace = true
+description = "MegaLogViewer .msl datalog writer/reader driven by INI [Datalog] entries"
+
+[dependencies]
+ts-ini = { path = "../ts-ini" }
+thiserror.workspace = true

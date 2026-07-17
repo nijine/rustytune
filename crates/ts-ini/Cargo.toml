@@ -1,0 +1,8 @@
+[package]
+name = "ts-ini"
+version.workspace = true
+edition.workspace = true
+description = "TunerStudio ECU-definition INI parser (Speeduino subset)"
+
+[dependencies]
+thiserror.workspace = true

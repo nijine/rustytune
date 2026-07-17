@@ -1,0 +1,9 @@
+[package]
+name = "tune-model"
+version.workspace = true
+edition.workspace = true
+description = "Tune page buffers, typed constant/table views, dirty tracking, .msq I/O"
+
+[dependencies]
+ts-ini = { path = "../ts-ini" }
+thiserror.workspace = true
