@@ -17,10 +17,12 @@ pub mod lex;
 pub mod model;
 mod preprocess;
 mod sections;
+pub mod telemetry;
 
 pub use expr::{Expr, SymbolSource, Value};
 pub use lex::Shape;
 pub use model::*;
+pub use telemetry::Telemetry;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

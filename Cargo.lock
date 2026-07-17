@@ -243,8 +243,10 @@ name = "ecu-proto"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "libc",
  "thiserror",
  "tracing",
+ "ts-ini",
 ]
 
 [[package]]

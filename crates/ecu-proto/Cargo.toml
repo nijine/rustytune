@@ -6,5 +6,9 @@ description = "Speeduino serial protocols: TunerStudio Protocol 3 envelope and s
 
 [dependencies]
 crc32fast = "1"
+libc = "0.2"
 thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+ts-ini = { path = "../ts-ini" }
