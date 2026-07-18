@@ -278,6 +278,48 @@ impl Tune {
         Ok(raw.clamp(lo, hi))
     }
 
+    /// User-unit value of a PcVariable — a TunerStudio-side setting (gauge
+    /// limits, analysis knobs) that lives in the tuning app, not in ECU
+    /// pages. Values are seeded from `[DefaultValues]`; a pcVariable with no
+    /// default reads as 0.
+    pub fn pc_value(&self, name: &str) -> Option<f64> {
+        self.def
+            .pc_variables
+            .contains_key(name)
+            .then(|| self.pc_values.get(name).copied().unwrap_or(0.0))
+    }
+
+    /// Set a PcVariable (user units, clamped to its lo/hi). No serial or
+    /// dirty-tracking involvement — nothing on the ECU changes.
+    pub fn set_pc_value(&mut self, name: &str, user: f64) -> Result<(), TuneError> {
+        let c = self
+            .def
+            .pc_variables
+            .get(name)
+            .ok_or_else(|| TuneError::UnknownConstant(name.into()))?
+            .clone();
+        let mut user = user;
+        if let Some(lo) = &c.lo
+            && let Ok(lo) = lo.eval(self)
+        {
+            user = user.max(lo);
+        }
+        if let Some(hi) = &c.hi
+            && let Ok(hi) = hi.eval(self)
+        {
+            user = user.min(hi);
+        }
+        self.pc_values.insert(name.into(), user);
+        Ok(())
+    }
+
+    /// Carry PcVariable values from a previous tune (e.g. across a
+    /// reconnect, which rebuilds the page state but shouldn't reset the
+    /// user's gauge limits).
+    pub fn adopt_pc_values(&mut self, previous: &Tune) {
+        self.pc_values = previous.pc_values.clone();
+    }
+
     /// Write a scalar or bits constant into the local page data.
     pub fn set_constant(&mut self, name: &str, user: f64) -> Result<(), TuneError> {
         self.set_constant_impl(name, user, true)

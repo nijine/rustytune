@@ -24,9 +24,12 @@ export default function App() {
       .catch((e: Error) => setLoadError(e.message));
     api.status().then(setStatus).catch(() => {});
     feed.start();
-    const off = feed.onStatus(setStatus);
+    const offStatus = feed.onStatus(setStatus);
+    // Editing gauge limits (PcVariables) re-resolves gauge bounds live.
+    const offDefinition = feed.onDefinition(setDefinition);
     return () => {
-      off();
+      offStatus();
+      offDefinition();
       feed.stop();
     };
   }, [feed]);

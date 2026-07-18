@@ -27,7 +27,9 @@ use crate::definition::{Defaults, DefinitionUi};
 pub struct AppState {
     pub def: Arc<ts_ini::IniDef>,
     pub defaults: Arc<Defaults>,
-    pub definition: DefinitionUi,
+    /// Gauge/indicator UI with bounds resolved; refreshed when PcVariables
+    /// (gauge limits) change.
+    pub definition: Mutex<DefinitionUi>,
     pub status: Arc<Mutex<Status>>,
     pub events: broadcast::Sender<String>,
     pub comms: Mutex<Option<CommsHandle>>,
@@ -128,7 +130,22 @@ pub async fn status(State(state): State<SharedState>) -> Json<Status> {
 }
 
 pub async fn definition(State(state): State<SharedState>) -> Json<DefinitionUi> {
-    Json(state.definition.clone())
+    Json(state.definition.lock().unwrap().clone())
+}
+
+/// Re-resolve gauge bounds (expressions over PcVariables like `{rpmhigh}`)
+/// and push the fresh definition to every connected client.
+fn refresh_definition(state: &AppState, tune: &Tune) {
+    let ui = crate::definition::definition_ui(
+        &state.def,
+        &crate::definition::PcOverlay {
+            tune,
+            defaults: &state.defaults,
+        },
+    );
+    let msg = serde_json::json!({ "type": "definition", "definition": &ui }).to_string();
+    *state.definition.lock().unwrap() = ui;
+    let _ = state.events.send(msg);
 }
 
 #[derive(Deserialize)]
@@ -206,8 +223,14 @@ fn do_connect(state: &SharedState, req: ConnectReq) -> Result<Status, ApiError> 
             ..Status::default()
         };
     }
-    // Fresh tune snapshot and lock for this connection.
-    *state.tune.lock().unwrap() = Tune::new(state.def.clone());
+    // Fresh tune snapshot and lock for this connection; app-side
+    // PcVariables (gauge limits) carry over.
+    {
+        let mut tune = state.tune.lock().unwrap();
+        let mut fresh = Tune::new(state.def.clone());
+        fresh.adopt_pc_values(&tune);
+        *tune = fresh;
+    }
     *state.writer.lock().unwrap() = None;
 
     let pages = match mode {
@@ -516,10 +539,17 @@ struct ConstantJson {
 }
 
 fn constant_json(state: &AppState, tune: &Tune, name: &str) -> Option<ConstantJson> {
-    let c = state.def.constants.get(name)?;
-    let value = match tune.constant_value(name)? {
-        Value::Num(n) => serde_json::json!(n),
-        Value::Str(s) => serde_json::json!(s),
+    // Page constants (ECU bytes) or PcVariables (app-side settings like
+    // gauge limits — no power cycle, no burn).
+    let (c, value, requires_power_cycle) = if let Some(c) = state.def.constants.get(name) {
+        let value = match tune.constant_value(name)? {
+            Value::Num(n) => serde_json::json!(n),
+            Value::Str(s) => serde_json::json!(s),
+        };
+        (c, value, tune.requires_power_cycle(name))
+    } else {
+        let c = state.def.pc_variables.get(name)?;
+        (c, serde_json::json!(tune.pc_value(name)?), false)
     };
     Some(ConstantJson {
         name: name.to_string(),
@@ -533,7 +563,7 @@ fn constant_json(state: &AppState, tune: &Tune, name: &str) -> Option<ConstantJs
         lo: c.lo.as_ref().and_then(|v| v.eval(tune).ok()),
         hi: c.hi.as_ref().and_then(|v| v.eval(tune).ok()),
         labels: c.labels.clone(),
-        requires_power_cycle: tune.requires_power_cycle(name),
+        requires_power_cycle,
     })
 }
 
@@ -572,17 +602,31 @@ pub async fn tune_set_constant(
     if let Err(e) = acquire_writer(&state, &headers) {
         return e.into_response();
     }
+    // PcVariables (gauge limits, ...) are app-side: no serial write, no
+    // dirty tracking — but gauge bounds may depend on them.
+    let is_pc =
+        !state.def.constants.contains_key(&name) && state.def.pc_variables.contains_key(&name);
     let response = {
         let mut tune = state.tune.lock().unwrap();
         if !tune.loaded() {
             return err(StatusCode::CONFLICT, "tune not loaded").into_response();
         }
-        if let Err(e) = tune.set_constant(&name, req.value) {
+        let result = if is_pc {
+            tune.set_pc_value(&name, req.value)
+        } else {
+            tune.set_constant(&name, req.value)
+        };
+        if let Err(e) = result {
             return err(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+        }
+        if is_pc {
+            refresh_definition(&state, &tune);
         }
         constant_json(&state, &tune, &name)
     };
-    broadcast_tune(&state);
+    if !is_pc {
+        broadcast_tune(&state);
+    }
     match response {
         Some(c) => Json(c).into_response(),
         None => err(StatusCode::INTERNAL_SERVER_ERROR, "constant vanished").into_response(),
@@ -693,8 +737,13 @@ fn dialog_items(
                 }
                 match constant {
                     None => {
-                        // `#` marks a TS bold header; blank labels are spacers.
-                        let text = label.trim_start_matches(['#', '!']).trim();
+                        // `#` marks a TS bold header, `!"..."` red note text;
+                        // blank labels are spacers.
+                        let text = label
+                            .trim_start_matches(['#', '!'])
+                            .trim()
+                            .trim_matches('"')
+                            .trim();
                         if !text.is_empty() {
                             out.push(serde_json::json!({ "type": "header", "label": text }));
                         }
@@ -746,6 +795,22 @@ fn dialog_items(
     out
 }
 
+/// The label a [Menu] entry gives this target — the fallback title for
+/// dialogs defined with an empty one (`dialog = engine_constants, ""`).
+fn menu_label(def: &ts_ini::IniDef, target: &str) -> Option<String> {
+    def.menus
+        .iter()
+        .flat_map(|m| m.items.iter())
+        .find_map(|item| match item {
+            MenuItem::Entry(e) if e.target == target => Some(e.label.clone()),
+            MenuItem::Group { children, .. } => children
+                .iter()
+                .find(|e| e.target == target)
+                .map(|e| e.label.clone()),
+            _ => None,
+        })
+}
+
 pub async fn tune_dialog(State(state): State<SharedState>, Path(name): Path<String>) -> Response {
     let tune = state.tune.lock().unwrap();
     if !tune.loaded() {
@@ -754,11 +819,16 @@ pub async fn tune_dialog(State(state): State<SharedState>, Path(name): Path<Stri
     let Some(dialog) = state.def.dialogs.get(&name) else {
         return err(StatusCode::NOT_FOUND, format!("no dialog `{name}`")).into_response();
     };
+    let title = if dialog.title.is_empty() {
+        menu_label(&state.def, &name).unwrap_or_else(|| dialog.name.clone())
+    } else {
+        dialog.title.clone()
+    };
     let mut visited = vec![name.clone()];
     let items = dialog_items(&state, &tune, dialog, &mut visited);
     Json(serde_json::json!({
         "name": dialog.name,
-        "title": dialog.title,
+        "title": title,
         "help": dialog.topic_help,
         "items": items,
     }))
@@ -953,7 +1023,10 @@ pub async fn msq_apply(
         }
         let names: Option<std::collections::HashSet<String>> =
             req.names.map(|n| n.into_iter().collect());
-        tune_model::msq::apply(file, &mut tune, names.as_ref())
+        let report = tune_model::msq::apply(file, &mut tune, names.as_ref());
+        // The file may carry PcVariables (gauge limits) — re-resolve gauges.
+        refresh_definition(&state, &tune);
+        report
     };
     broadcast_tune(&state);
     Json(serde_json::json!({

@@ -141,7 +141,8 @@ async fn browser_workflow() {
                 let indicators = value["indicators"].as_array().unwrap();
                 assert_eq!(indicators.len(), n_indicators);
             }
-            Some("tune") => {} // dirty/burn broadcasts ride the same socket
+            Some("tune") => {}       // dirty/burn broadcasts ride the same socket
+            Some("definition") => {} // gauge-limit edits re-push the definition
             other => panic!("unexpected message type {other:?}"),
         }
     }
@@ -276,6 +277,60 @@ async fn browser_workflow() {
         .unwrap();
     assert_eq!(tune["burnPending"], false);
 
+    // Gauge limits are PcVariables: editable app-side, no burn involved,
+    // and the definition (gauge bounds) re-resolves immediately.
+    let dialog: serde_json::Value = http
+        .get(format!("{base}/tune/dialog/gaugeLimits"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rpmhigh = dialog["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["type"] == "constant" && i["constant"]["name"] == "rpmhigh")
+        .expect("rpmhigh renders as an editable value");
+    assert_eq!(rpmhigh["constant"]["value"], 8000.0);
+
+    let resp = http
+        .post(format!("{base}/tune/constant/rpmhigh"))
+        .header("X-Client-Id", "client-a")
+        .json(&serde_json::json!({ "value": 9000.0 }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let updated: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(updated["value"], 9000.0);
+    assert_eq!(updated["requiresPowerCycle"], false);
+
+    let definition: serde_json::Value = http
+        .get(format!("{base}/definition"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        definition["gauges"][0]["hi"], 9000.0,
+        "tachometer hi must track the edited rpmhigh"
+    );
+    // App-side write: nothing became dirty or burn-pending.
+    let tune: serde_json::Value = http
+        .get(format!("{base}/tune"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tune["dirty"], false);
+    assert_eq!(tune["burnPending"], false);
+
     // Settings dialogs: the INI's [Menu] tree resolves to [UserDefined]
     // forms with live values and evaluated enable conditions.
     let menus: serde_json::Value = http
@@ -356,6 +411,17 @@ async fn browser_workflow() {
             "idleTaperTime gate at iacAlgorithm={algo}"
         );
     }
+    // Empty-titled dialogs fall back to their menu label.
+    let dialog: serde_json::Value = http
+        .get(format!("{base}/tune/dialog/engine_constants"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(dialog["title"], "Engine Constants");
+
     // Wait for the settings writes to flush so later dirty checks are clean.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {

@@ -33,6 +33,22 @@ impl SymbolSource for Defaults {
     }
 }
 
+/// Symbol source for definition refreshes: live PcVariables first (gauge
+/// limits are editable at runtime), `[DefaultValues]` for everything else.
+pub struct PcOverlay<'a> {
+    pub tune: &'a tune_model::Tune,
+    pub defaults: &'a Defaults,
+}
+
+impl SymbolSource for PcOverlay<'_> {
+    fn value(&self, name: &str) -> Option<Value> {
+        self.tune
+            .pc_value(name)
+            .map(Value::Num)
+            .or_else(|| self.defaults.value(name))
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GaugeUi {
@@ -91,7 +107,7 @@ fn gauge_ui(gauge: &GaugeDef, syms: &dyn SymbolSource) -> GaugeUi {
     }
 }
 
-pub fn definition_ui(def: &IniDef, defaults: &Defaults) -> DefinitionUi {
+pub fn definition_ui(def: &IniDef, defaults: &dyn SymbolSource) -> DefinitionUi {
     let gauges = def
         .front_page
         .gauges

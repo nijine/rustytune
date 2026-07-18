@@ -41,7 +41,7 @@ pub fn build_state_with_symbols(
     log_dir: PathBuf,
 ) -> SharedState {
     let defaults = Arc::new(Defaults::from_ini(&def));
-    let definition = definition::definition_ui(&def, &defaults);
+    let definition = Mutex::new(definition::definition_ui(&def, defaults.as_ref()));
     // Frame + status events; capacity covers a couple seconds of frames for
     // a briefly stalled client before it lags.
     let (events, _) = broadcast::channel(64);

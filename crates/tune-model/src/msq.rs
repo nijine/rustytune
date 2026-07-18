@@ -355,6 +355,34 @@ pub fn apply(file: &MsqFile, tune: &mut Tune, names: Option<&HashSet<String>>) -
             Err(e) => report.skipped.push((name.clone(), e.to_string())),
         }
     }
+    // PcVariables: app-side settings (gauge limits, ...) restored without
+    // touching ECU state. Unknown names are skipped silently — files from
+    // other TS versions carry pc variables we don't define.
+    for (name, value) in &file.pc_variables {
+        if let Some(filter) = names
+            && !filter.contains(name)
+        {
+            continue;
+        }
+        let Some(c) = tune.def().pc_variables.get(name).cloned() else {
+            continue;
+        };
+        let user = match (c.class, value) {
+            (ConstantClass::Scalar, MsqValue::Num(v)) => Some(*v),
+            (ConstantClass::Bits, MsqValue::Num(v)) => Some(*v),
+            (ConstantClass::Bits, MsqValue::Text(label)) => c
+                .labels
+                .iter()
+                .position(|l| l == label)
+                .map(|idx| idx as f64),
+            _ => None,
+        };
+        if let Some(user) = user
+            && tune.set_pc_value(name, user).is_ok()
+        {
+            report.applied += 1;
+        }
+    }
     report
 }
 
@@ -396,6 +424,49 @@ pub fn save(tune: &Tune, symbols: &[String], author: &str, write_date: &str) -> 
         tune.page_count(),
         xml_escape(&def.signature)
     ));
+
+    // PcVariables (gauge limits, tsCanId, ...) — TunerStudio-side settings
+    // carried in the file so they survive alongside the tune. Only ones
+    // holding a value are written; pc arrays (curve scratch data) are not
+    // tracked and are skipped.
+    for (name, c) in &def.pc_variables {
+        if c.no_msq_save || !matches!(c.class, ConstantClass::Scalar | ConstantClass::Bits) {
+            continue;
+        }
+        let Some(v) = tune.pc_values.get(name).copied() else {
+            continue;
+        };
+        match c.class {
+            ConstantClass::Scalar => {
+                let digits = c
+                    .digits
+                    .as_ref()
+                    .and_then(|d| d.eval(tune).ok())
+                    .unwrap_or(0.0) as u8;
+                let units = c
+                    .units
+                    .as_ref()
+                    .and_then(|u| u.eval(tune).ok())
+                    .map(|u| format!(" units=\"{}\"", xml_escape(u.trim_matches('"'))))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "<pcVariable digits=\"{digits}\" name=\"{name}\"{units}>{}</pcVariable>\n",
+                    fmt_num(v)
+                ));
+            }
+            ConstantClass::Bits => match c.labels.get(v as usize) {
+                Some(label) if label != "INVALID" => out.push_str(&format!(
+                    "<pcVariable name=\"{name}\">&quot;{}&quot;</pcVariable>\n",
+                    xml_escape(label)
+                )),
+                _ => out.push_str(&format!(
+                    "<pcVariable name=\"{name}\">{}</pcVariable>\n",
+                    v as i64
+                )),
+            },
+            _ => unreachable!(),
+        }
+    }
 
     for page_idx in 0..tune.page_count() {
         out.push_str(&format!("<page number=\"{page_idx}\">\n"));
@@ -604,5 +675,26 @@ mod tests {
         let names: Vec<&str> = d.entries.iter().map(|e| e.name.as_str()).collect();
         assert!(!names.contains(&"reqFuel"), "reqFuel was applied");
         assert!(names.contains(&"veTable"), "veTable must remain different");
+    }
+
+    #[test]
+    fn pc_variables_round_trip() {
+        // The real TS file carries gauge limits; applying restores them.
+        let mut tune = loaded_tune();
+        let file = real_msq();
+        assert_eq!(file.pc_variables["rpmhigh"], MsqValue::Num(8000.0));
+        apply(&file, &mut tune, None);
+        assert_eq!(tune.pc_value("rpmhigh"), Some(8000.0));
+        assert_eq!(tune.pc_value("batlow"), Some(11.8));
+
+        // Edited limits survive our own save → parse → apply.
+        tune.set_pc_value("rpmhigh", 9000.0).unwrap();
+        let saved = save(&tune, &[], "t", "d");
+        let reparsed = parse(&saved).unwrap();
+        assert_eq!(reparsed.pc_variables["rpmhigh"], MsqValue::Num(9000.0));
+
+        let mut fresh = loaded_tune();
+        apply(&reparsed, &mut fresh, None);
+        assert_eq!(fresh.pc_value("rpmhigh"), Some(9000.0));
     }
 }

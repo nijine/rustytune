@@ -2,11 +2,12 @@
 // gauges read `latest` from their own requestAnimationFrame loops instead
 // of going through React state, so a frame never re-renders the tree.
 
-import type { Frame, Status, TuneState } from "./api";
+import type { Definition, Frame, Status, TuneState } from "./api";
 
 type FrameListener = (frame: Frame) => void;
 type StatusListener = (status: Status) => void;
 type TuneListener = (state: TuneState) => void;
+type DefinitionListener = (definition: Definition) => void;
 
 export class TelemetryFeed {
   latest: Frame | null = null;
@@ -17,6 +18,7 @@ export class TelemetryFeed {
   private frameListeners = new Set<FrameListener>();
   private statusListeners = new Set<StatusListener>();
   private tuneListeners = new Set<TuneListener>();
+  private definitionListeners = new Set<DefinitionListener>();
 
   start() {
     this.closed = false;
@@ -45,6 +47,12 @@ export class TelemetryFeed {
     return () => this.tuneListeners.delete(fn);
   }
 
+  /// Server re-resolved the definition (e.g. gauge limits edited).
+  onDefinition(fn: DefinitionListener): () => void {
+    this.definitionListeners.add(fn);
+    return () => this.definitionListeners.delete(fn);
+  }
+
   private open() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
@@ -59,6 +67,9 @@ export class TelemetryFeed {
         for (const fn of this.statusListeners) fn(msg as Status);
       } else if (msg.type === "tune") {
         for (const fn of this.tuneListeners) fn(msg as TuneState);
+      } else if (msg.type === "definition") {
+        for (const fn of this.definitionListeners)
+          fn(msg.definition as Definition);
       }
     };
     ws.onclose = () => {
