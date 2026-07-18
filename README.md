@@ -12,7 +12,9 @@ headless on an in-car Raspberry Pi and tune from any device on its network.
 watch the INI-defined gauges live, record MegaLogViewer `.msl` datalogs,
 edit VE/ignition/AFR tables in the browser (live `M` writes,
 CRC-verified), edit every settings dialog the INI defines (acceleration
-enrichment, idle, fan, launch, boost, ...), burn to EEPROM, and diff the
+enrichment, idle, fan, launch, boost, ...), drag points on every
+correction curve (WUE, dwell, IAT retard, idle targets, ...) with a live
+operating-point cursor, burn to EEPROM, and diff the
 ECU against a TunerStudio `.msq` — with selective apply and save. No ECU
 around? Open a `.msq` offline and edit it with the same table/settings UI,
 then save it back out.

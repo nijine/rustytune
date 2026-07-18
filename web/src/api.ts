@@ -89,6 +89,28 @@ export interface TableJson {
   yChannel: string | null;
 }
 
+export interface CurveJson {
+  id: string;
+  title: string;
+  xLabel: string | null;
+  yLabel: string | null;
+  x: number[];
+  y: number[];
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+  xLo: number | null;
+  xHi: number | null;
+  yLo: number | null;
+  yHi: number | null;
+  xDigits: number;
+  yDigits: number;
+  xUnits: string | null;
+  yUnits: string | null;
+  xChannel: string | null;
+}
+
 /// `{"type":"tune"}` WS message: dirty/burn state for all clients.
 export interface TuneState {
   loaded: boolean;
@@ -245,6 +267,11 @@ export const api = {
     request<ConstantJson[]>(`/api/tune/constants?names=${names.join(",")}`),
   setConstant: (name: string, value: number) =>
     post<ConstantJson>(`/api/tune/constant/${name}`, { value }),
+  curve: (id: string) => request<CurveJson>(`/api/tune/curve/${id}`),
+  setCurvePoints: (
+    id: string,
+    points: { axis: "x" | "y"; index: number; value: number }[],
+  ) => post(`/api/tune/curve/${id}/points`, { points }),
   menus: () => request<MenuJson[]>("/api/tune/menus"),
   dialog: (name: string) => request<DialogJson>(`/api/tune/dialog/${name}`),
   burn: () => post<{ burnedPages: number[] }>("/api/tune/burn"),

@@ -731,6 +731,85 @@ button.burn-needed {
   color: var(--accent);
 }
 
+/* Curve editor */
+.curve-editor {
+  margin: 10px 0;
+  max-width: 620px;
+}
+
+.curve-chart {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  touch-action: none;
+  user-select: none;
+}
+
+.curve-grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+
+.curve-tick {
+  fill: var(--muted);
+  font-size: 9px;
+}
+
+.curve-axis {
+  fill: var(--secondary);
+  font-size: 10px;
+}
+
+.curve-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.curve-point {
+  fill: var(--accent);
+  stroke: var(--ink);
+  stroke-width: 1;
+  cursor: ns-resize;
+}
+
+.curve-point:hover {
+  fill: var(--warning);
+}
+
+.curve-live {
+  stroke: var(--warning);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.curve-values {
+  overflow-x: auto;
+  margin-top: 6px;
+}
+
+.curve-values table {
+  border-collapse: collapse;
+}
+
+.curve-values th {
+  font-size: 0.7rem;
+  color: var(--secondary);
+  font-weight: 500;
+  text-align: right;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.curve-values input {
+  width: 54px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 3px 4px;
+}
+
 /* Saved-log browser dropdown */
 .log-browser {
   position: relative;

@@ -14,6 +14,7 @@ import {
   type TuneState,
 } from "../api";
 import type { TelemetryFeed } from "../feed";
+import CurveEditor from "./CurveEditor";
 
 function ConstantRow({
   label,
@@ -74,9 +75,13 @@ function ConstantRow({
 function DialogItems({
   items,
   onCommit,
+  feed,
+  onError,
 }: {
   items: DialogItemJson[];
   onCommit: (c: ConstantJson, value: number) => void;
+  feed: TelemetryFeed;
+  onError: (msg: string) => void;
 }) {
   return (
     <>
@@ -105,17 +110,27 @@ function DialogItems({
                 className={`dlg-panel${item.enabled ? "" : " disabled"}`}
               >
                 {item.title && <legend>{item.title}</legend>}
-                <DialogItems items={item.items} onCommit={onCommit} />
+                <DialogItems
+                  items={item.items}
+                  onCommit={onCommit}
+                  feed={feed}
+                  onError={onError}
+                />
               </fieldset>
             );
           case "curve":
+            return (
+              <CurveEditor
+                key={item.name}
+                id={item.name}
+                feed={feed}
+                onError={onError}
+              />
+            );
           case "table":
             return (
               <p key={`${item.name}-${i}`} className="muted dlg-ref">
-                ⤷ {item.title || item.name} —{" "}
-                {item.type === "table"
-                  ? "edit in the Tuning tab"
-                  : "curve editor not yet available"}
+                ⤷ {item.title || item.name} — edit in the Tuning tab
               </p>
             );
           case "unsupported":
@@ -138,15 +153,16 @@ function MenuEntryButton({
 }: {
   entry: MenuEntryJson;
   selected: boolean;
-  onSelect: (name: string) => void;
+  onSelect: (entry: MenuEntryJson) => void;
 }) {
-  if (entry.type !== "dialog") return null;
+  if (entry.type !== "dialog" && entry.type !== "curve") return null;
   return (
     <button
       className={`menu-entry${selected ? " selected" : ""}`}
       disabled={!entry.enabled}
-      onClick={() => onSelect(entry.name)}
+      onClick={() => onSelect(entry)}
     >
+      {entry.type === "curve" ? "∿ " : ""}
       {entry.label}
     </button>
   );
@@ -162,7 +178,7 @@ export default function SettingsView({
   offline: boolean;
 }) {
   const [menus, setMenus] = useState<MenuJson[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<MenuEntryJson | null>(null);
   const [dialog, setDialog] = useState<DialogJson | null>(null);
   const [tuneState, setTuneState] = useState<TuneState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -197,16 +213,20 @@ export default function SettingsView({
         if (refreshTimer.current) clearTimeout(refreshTimer.current);
         refreshTimer.current = setTimeout(() => {
           loadMenus();
-          if (selected) loadDialog(selected);
+          if (selected?.type === "dialog") loadDialog(selected.name);
         }, 600);
       }),
     [feed, selected, loadMenus, loadDialog],
   );
 
-  const select = (name: string) => {
-    setSelected(name);
+  const select = (entry: MenuEntryJson) => {
+    setSelected(entry);
     setNotice(null);
-    loadDialog(name);
+    if (entry.type === "dialog") {
+      loadDialog(entry.name);
+    } else {
+      setDialog(null);
+    }
   };
 
   const commit = (c: ConstantJson, value: number) => {
@@ -219,7 +239,7 @@ export default function SettingsView({
             : null,
         );
         setError(null);
-        if (selected) loadDialog(selected);
+        if (selected?.type === "dialog") loadDialog(selected.name);
       })
       .catch((e: Error) => setError(e.message));
   };
@@ -260,7 +280,7 @@ export default function SettingsView({
                         <MenuEntryButton
                           key={child.name}
                           entry={child}
-                          selected={selected === child.name}
+                          selected={selected?.name === child.name}
                           onSelect={select}
                         />
                       ))}
@@ -271,7 +291,7 @@ export default function SettingsView({
                     <MenuEntryButton
                       key={item.name}
                       entry={item}
-                      selected={selected === item.name}
+                      selected={selected?.name === item.name}
                       onSelect={select}
                     />
                   );
@@ -308,9 +328,23 @@ export default function SettingsView({
           {error && <span className="error">{error}</span>}
           {notice && <span className="warn-note">⚡ {notice}</span>}
         </div>
-        {dialog ? (
+        {selected?.type === "curve" ? (
           <div className="dlg-body">
-            <DialogItems items={dialog.items} onCommit={commit} />
+            <CurveEditor
+              key={selected.name}
+              id={selected.name}
+              feed={feed}
+              onError={setError}
+            />
+          </div>
+        ) : dialog ? (
+          <div className="dlg-body">
+            <DialogItems
+              items={dialog.items}
+              onCommit={commit}
+              feed={feed}
+              onError={setError}
+            />
             {dialog.help && (
               <p className="muted dlg-help">
                 <a href={dialog.help} target="_blank" rel="noreferrer">

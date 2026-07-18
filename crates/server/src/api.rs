@@ -621,6 +621,158 @@ pub async fn tune_table_cells(
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
+// ----- curves: 1D bins pairs from [CurveEditor] -----------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurveJson {
+    id: String,
+    title: String,
+    x_label: Option<String>,
+    y_label: Option<String>,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    /// Chart display bounds from the INI's xAxis/yAxis (min, max).
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    /// Edit clamps/format from the bins constants.
+    x_lo: Option<f64>,
+    x_hi: Option<f64>,
+    y_lo: Option<f64>,
+    y_hi: Option<f64>,
+    x_digits: u8,
+    y_digits: u8,
+    x_units: Option<String>,
+    y_units: Option<String>,
+    /// Output channel driving the live operating-point cursor.
+    x_channel: Option<String>,
+}
+
+fn curve_json(state: &AppState, tune: &Tune, id: &str) -> Option<CurveJson> {
+    let curve = state.def.curves.get(id)?;
+    let y_bin = curve.y_bins.first()?;
+    let x = tune.array_values(&curve.x_bins.0)?;
+    let y = tune.array_values(y_bin)?;
+
+    let axis = |bounds: &[ts_ini::NumOrExpr], i: usize, fallback: f64| {
+        bounds
+            .get(i)
+            .and_then(|v| v.eval(tune).ok())
+            .unwrap_or(fallback)
+    };
+    let bin_meta = |name: &str| {
+        let c = state.def.constants.get(name)?;
+        Some((
+            c.lo.as_ref().and_then(|v| v.eval(tune).ok()),
+            c.hi.as_ref().and_then(|v| v.eval(tune).ok()),
+            c.digits
+                .as_ref()
+                .and_then(|d| d.eval(tune).ok())
+                .unwrap_or(0.0) as u8,
+            c.units.as_ref().and_then(|u| u.eval(tune).ok()),
+        ))
+    };
+    let (x_lo, x_hi, x_digits, x_units) =
+        bin_meta(&curve.x_bins.0).unwrap_or((None, None, 0, None));
+    let (y_lo, y_hi, y_digits, y_units) = bin_meta(y_bin).unwrap_or((None, None, 0, None));
+
+    Some(CurveJson {
+        id: id.to_string(),
+        title: curve.title.clone(),
+        x_label: curve.column_label.first().cloned(),
+        y_label: curve.column_label.get(1).cloned(),
+        x_min: axis(&curve.x_axis, 0, x.iter().copied().fold(f64::MAX, f64::min)),
+        x_max: axis(&curve.x_axis, 1, x.iter().copied().fold(f64::MIN, f64::max)),
+        y_min: axis(&curve.y_axis, 0, 0.0),
+        y_max: axis(&curve.y_axis, 1, y.iter().copied().fold(f64::MIN, f64::max)),
+        x,
+        y,
+        x_lo,
+        x_hi,
+        y_lo,
+        y_hi,
+        x_digits,
+        y_digits,
+        x_units,
+        y_units,
+        x_channel: curve.x_bins.1.clone(),
+    })
+}
+
+pub async fn tune_curve(State(state): State<SharedState>, Path(id): Path<String>) -> Response {
+    let tune = state.tune.lock().unwrap();
+    if !tune.loaded() {
+        return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+    }
+    if !state.def.curves.contains_key(&id) {
+        return err(StatusCode::NOT_FOUND, format!("unknown curve `{id}`")).into_response();
+    }
+    match curve_json(&state, &tune, &id) {
+        Some(c) => Json(c).into_response(),
+        None => err(
+            StatusCode::CONFLICT,
+            format!("curve `{id}` does not decode"),
+        )
+        .into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CurvePointEdit {
+    /// "x" edits the bins axis, "y" the values.
+    pub axis: String,
+    pub index: usize,
+    pub value: f64,
+}
+
+#[derive(Deserialize)]
+pub struct CurvePointsReq {
+    pub points: Vec<CurvePointEdit>,
+}
+
+pub async fn tune_curve_points(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<CurvePointsReq>,
+) -> Response {
+    if let Err(e) = acquire_writer(&state, &headers) {
+        return e.into_response();
+    }
+    let Some(curve) = state.def.curves.get(&id) else {
+        return err(StatusCode::NOT_FOUND, format!("unknown curve `{id}`")).into_response();
+    };
+    let Some(y_bin) = curve.y_bins.first() else {
+        return err(StatusCode::CONFLICT, format!("curve `{id}` has no yBins")).into_response();
+    };
+    {
+        let mut tune = state.tune.lock().unwrap();
+        if !tune.loaded() {
+            return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+        }
+        for p in &req.points {
+            let bin = match p.axis.as_str() {
+                "x" => &curve.x_bins.0,
+                "y" => y_bin,
+                other => {
+                    return err(
+                        StatusCode::BAD_REQUEST,
+                        format!("axis must be x or y, got `{other}`"),
+                    )
+                    .into_response();
+                }
+            };
+            if let Err(e) = tune.set_array_element(bin, p.index, p.value) {
+                return err(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            }
+        }
+    }
+    broadcast_tune(&state);
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConstantJson {

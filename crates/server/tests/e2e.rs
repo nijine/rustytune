@@ -709,6 +709,58 @@ async fn offline_msq_editing() {
         .unwrap();
     assert_eq!(table["z"].as_array().unwrap().len(), 16);
 
+    // Curve editor: WUE decodes from the file with its INI metadata.
+    let curve: serde_json::Value = http
+        .get(format!("{base}/tune/curve/warmup_curve"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(curve["title"], "Warmup Enrichment (WUE) Curve");
+    assert_eq!(curve["xLabel"], "Coolant");
+    assert_eq!(curve["xChannel"], "coolant");
+    let n = curve["x"].as_array().unwrap().len();
+    assert_eq!(curve["y"].as_array().unwrap().len(), n);
+    assert!(n >= 6, "{n}");
+
+    // Edit a y value and an x bin; both round-trip through the page bytes.
+    let resp = http
+        .post(format!("{base}/tune/curve/warmup_curve/points"))
+        .header("X-Client-Id", "offline-client")
+        .json(&serde_json::json!({ "points": [
+            { "axis": "y", "index": 1, "value": 142.0 },
+            { "axis": "x", "index": 0, "value": -30.0 },
+        ] }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let curve: serde_json::Value = http
+        .get(format!("{base}/tune/curve/warmup_curve"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(curve["y"][1], 142.0);
+    // Temperature bins quantize through the raw byte encoding; the write
+    // lands on the nearest representable value.
+    let x0 = curve["x"][0].as_f64().unwrap();
+    assert!((x0 + 30.0).abs() < 1.0, "{x0}");
+    let resp = http
+        .post(format!("{base}/tune/curve/warmup_curve/points"))
+        .header("X-Client-Id", "offline-client")
+        .json(&serde_json::json!({ "points": [
+            { "axis": "z", "index": 0, "value": 1.0 },
+        ] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400, "bad axis rejected");
+
     // Edit offline: a table cell and a scalar. Dirty now means "unsaved
     // vs the opened file"; there is no ECU so burnPending stays false.
     let resp = http
