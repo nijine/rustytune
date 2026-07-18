@@ -149,6 +149,11 @@ export default function ConnectBar({
           className={`dot ${connected ? "ok" : ""}`}
           title={connected ? "connected" : "disconnected"}
         />
+        {status?.offline && (
+          <span className="offline-pill" title="Editing a .msq with no ECU">
+            offline tune
+          </span>
+        )}
       </div>
 
       {!connected && (

@@ -80,12 +80,22 @@ export default function App() {
               </div>
             </>
           )}
-          {tab === "tune" && <TuneView feed={feed} />}
+          {tab === "tune" && (
+            <TuneView feed={feed} offline={status?.offline ?? false} />
+          )}
           {tab === "settings" && (
-            <SettingsView feed={feed} tuneLoaded={status?.tuneLoaded ?? false} />
+            <SettingsView
+              feed={feed}
+              tuneLoaded={status?.tuneLoaded ?? false}
+              offline={status?.offline ?? false}
+            />
           )}
           {tab === "file" && (
-            <TuneFileView feed={feed} tuneLoaded={status?.tuneLoaded ?? false} />
+            <TuneFileView
+              feed={feed}
+              tuneLoaded={status?.tuneLoaded ?? false}
+              offline={status?.offline ?? false}
+            />
           )}
           <footer>
             <span>{definition.signature}</span>

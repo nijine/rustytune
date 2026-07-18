@@ -98,7 +98,13 @@ function ConstantsPanel({ onError }: { onError: (m: string | null) => void }) {
   );
 }
 
-export default function TuneView({ feed }: { feed: TelemetryFeed }) {
+export default function TuneView({
+  feed,
+  offline,
+}: {
+  feed: TelemetryFeed;
+  offline: boolean;
+}) {
   const [summary, setSummary] = useState<TuneSummary | null>(null);
   const [tuneState, setTuneState] = useState<TuneState | null>(null);
   const [tableId, setTableId] = useState<string | null>(null);
@@ -139,8 +145,9 @@ export default function TuneView({ feed }: { feed: TelemetryFeed }) {
   if (!(tuneState?.loaded ?? summary.loaded)) {
     return (
       <p className="muted center-note">
-        Tune not loaded — connect over USB (primary serial) to edit tables.
-        SER3 is telemetry-only.
+        Tune not loaded — connect over USB (primary serial) to edit tables,
+        or open a .msq offline from the Tune File tab. SER3 is
+        telemetry-only.
       </p>
     );
   }
@@ -159,18 +166,28 @@ export default function TuneView({ feed }: { feed: TelemetryFeed }) {
             </option>
           ))}
         </select>
-        {tuneState?.dirty && <span className="pill sending">sending…</span>}
-        <button
-          className={tuneState?.burnPending ? "burn-needed" : "ghost"}
-          disabled={burning || !tuneState?.burnPending}
-          onClick={burn}
-        >
-          {burning
-            ? "Burning…"
-            : tuneState?.burnPending
-              ? "Burn to ECU"
-              : "Burned"}
-        </button>
+        {tuneState?.dirty && (
+          <span className="pill sending">
+            {offline ? "unsaved changes" : "sending…"}
+          </span>
+        )}
+        {offline ? (
+          <a className="button-link" href="/api/msq/save" download>
+            Save tune as .msq
+          </a>
+        ) : (
+          <button
+            className={tuneState?.burnPending ? "burn-needed" : "ghost"}
+            disabled={burning || !tuneState?.burnPending}
+            onClick={burn}
+          >
+            {burning
+              ? "Burning…"
+              : tuneState?.burnPending
+                ? "Burn to ECU"
+                : "Burned"}
+          </button>
+        )}
         {error && <span className="error">{error}</span>}
       </div>
       <div className="tune-main">

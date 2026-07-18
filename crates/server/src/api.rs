@@ -192,6 +192,14 @@ fn do_connect(state: &SharedState, req: ConnectReq) -> Result<Status, ApiError> 
         }
     };
 
+    // Connecting replaces the tune; don't silently drop offline edits.
+    if state.status.lock().unwrap().offline && state.tune.lock().unwrap().any_dirty() {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "offline tune has unsaved changes — save it as .msq or close the offline session first",
+        ));
+    }
+
     let mut comms = state.comms.lock().unwrap();
     if let Some(handle) = comms.take() {
         if state.status.lock().unwrap().connected {
@@ -922,6 +930,76 @@ pub async fn tune_dialog(State(state): State<SharedState>, Path(name): Path<Stri
         "items": items,
     }))
     .into_response()
+}
+
+// ----- offline mode: edit an opened .msq with no ECU ------------------------
+
+/// Open the uploaded .msq as an offline tune: full editing (tables,
+/// settings, diff, save) with no serial connection. `dirty` then means
+/// "changed since the file was opened".
+pub async fn offline_open(State(state): State<SharedState>) -> Response {
+    if state.status.lock().unwrap().connected {
+        return err(
+            StatusCode::CONFLICT,
+            "connected to an ECU — disconnect first",
+        )
+        .into_response();
+    }
+    let report = {
+        let msq = state.msq.lock().unwrap();
+        let Some((_, file)) = msq.as_ref() else {
+            return err(StatusCode::CONFLICT, "no .msq uploaded").into_response();
+        };
+        let mut tune = state.tune.lock().unwrap();
+        let mut fresh = Tune::new(state.def.clone());
+        fresh.adopt_pc_values(&tune);
+        let report = tune_model::msq::apply(file, &mut fresh, None);
+        fresh.sync_shadows();
+        fresh.set_loaded(true);
+        *tune = fresh;
+        refresh_definition(&state, &tune);
+        report
+    };
+    *state.writer.lock().unwrap() = None;
+    let status = {
+        let mut status = state.status.lock().unwrap();
+        *status = Status {
+            offline: true,
+            tune_loaded: true,
+            ..Status::default()
+        };
+        status.clone()
+    };
+    let _ = state.events.send(comms::status_message(&status));
+    broadcast_tune(&state);
+    Json(serde_json::json!({
+        "status": status,
+        "applied": report.applied,
+        "skipped": report.skipped,
+    }))
+    .into_response()
+}
+
+/// End the offline session, discarding the working tune.
+pub async fn offline_close(State(state): State<SharedState>) -> Response {
+    if !state.status.lock().unwrap().offline {
+        return err(StatusCode::CONFLICT, "not in offline mode").into_response();
+    }
+    {
+        let mut tune = state.tune.lock().unwrap();
+        let mut fresh = Tune::new(state.def.clone());
+        fresh.adopt_pc_values(&tune);
+        *tune = fresh;
+    }
+    *state.writer.lock().unwrap() = None;
+    let status = {
+        let mut status = state.status.lock().unwrap();
+        *status = Status::default();
+        status.clone()
+    };
+    let _ = state.events.send(comms::status_message(&status));
+    broadcast_tune(&state);
+    Json(status).into_response()
 }
 
 // ----- .msq reference file: upload, diff, selective apply, save -------------

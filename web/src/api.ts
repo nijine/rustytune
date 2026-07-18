@@ -44,6 +44,7 @@ export interface Status {
   timeouts: number;
   ecuSignature: string | null;
   tuneLoaded: boolean;
+  offline: boolean;
   lastError: string | null;
   log: LogStatus | null;
 }
@@ -249,6 +250,11 @@ export const api = {
   burn: () => post<{ burnedPages: number[] }>("/api/tune/burn"),
   msqUpload: (filename: string, content: string) =>
     post<MsqMeta>("/api/msq", { filename, content }),
+  offlineOpen: () =>
+    post<{ applied: number; skipped: [string, string][]; status: Status }>(
+      "/api/offline",
+    ),
+  offlineClose: () => post<Status>("/api/offline/close"),
   msqDiff: () => request<MsqDiffJson>("/api/msq/diff"),
   msqApply: (names?: string[]) =>
     post<{ applied: number; skipped: [string, string][] }>("/api/msq/apply", {

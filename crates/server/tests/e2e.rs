@@ -631,3 +631,206 @@ async fn browser_workflow() {
 
     let _ = std::fs::remove_dir_all(&log_dir);
 }
+
+/// Offline mode: open a .msq with no ECU at all — full editing, diff
+/// against the file, save back out. No fake ECU spawned on purpose.
+#[tokio::test(flavor = "multi_thread")]
+async fn offline_msq_editing() {
+    let log_dir = std::env::temp_dir().join(format!("rustytune-e2e-off-{}", std::process::id()));
+    let def = ts_ini::parse(rustytune_server::EMBEDDED_INI).unwrap();
+    let state = rustytune_server::build_state(def, log_dir.clone());
+    let app = rustytune_server::app(state);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let base = format!("http://{addr}/api");
+    let http = reqwest::Client::new();
+
+    // No file uploaded yet: nothing to open.
+    let resp = http.post(format!("{base}/offline")).send().await.unwrap();
+    assert_eq!(resp.status(), 409);
+
+    // Upload the real TunerStudio save, open it offline.
+    let msq_content =
+        tune_model::msq::decode_latin1(include_bytes!("../../../fixtures/CurrentTune.msq"));
+    let resp = http
+        .post(format!("{base}/msq"))
+        .json(&serde_json::json!({ "filename": "CurrentTune.msq", "content": msq_content }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let opened: serde_json::Value = http
+        .post(format!("{base}/offline"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(opened["status"]["offline"], true, "{opened}");
+    assert_eq!(opened["status"]["tuneLoaded"], true);
+    assert_eq!(opened["status"]["connected"], false);
+    assert!(opened["applied"].as_u64().unwrap() > 500, "{opened}");
+
+    // The working tune is clean and holds the file's values, not zeros:
+    // reqFuel is 7.9 in CurrentTune.msq.
+    let tune: serde_json::Value = http
+        .get(format!("{base}/tune"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tune["loaded"], true);
+    assert_eq!(tune["dirty"], false);
+    assert_eq!(tune["burnPending"], false);
+    let constants: serde_json::Value = http
+        .get(format!("{base}/tune/constants?names=reqFuel"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(constants[0]["value"], 7.9);
+
+    // Tables decode from the file contents.
+    let table: serde_json::Value = http
+        .get(format!("{base}/tune/table/veTable1Tbl"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(table["z"].as_array().unwrap().len(), 16);
+
+    // Edit offline: a table cell and a scalar. Dirty now means "unsaved
+    // vs the opened file"; there is no ECU so burnPending stays false.
+    let resp = http
+        .post(format!("{base}/tune/table/veTable1Tbl/cells"))
+        .header("X-Client-Id", "offline-client")
+        .json(&serde_json::json!({ "cells": [{ "row": 0, "col": 0, "value": 55.0 }] }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let resp = http
+        .post(format!("{base}/tune/constant/reqFuel"))
+        .header("X-Client-Id", "offline-client")
+        .json(&serde_json::json!({ "value": 8.5 }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let tune: serde_json::Value = http
+        .get(format!("{base}/tune"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tune["dirty"], true);
+    assert_eq!(tune["burnPending"], false);
+
+    // The diff now reports exactly what changed relative to the file.
+    let diff: serde_json::Value = http
+        .get(format!("{base}/msq/diff"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = diff["entries"].as_array().unwrap();
+    let req = entries
+        .iter()
+        .find(|e| e["name"] == "reqFuel")
+        .expect("reqFuel differs from file");
+    assert_eq!(req["ecu"], 8.5);
+    assert_eq!(req["file"], 7.9);
+    assert!(entries.iter().any(|e| e["name"] == "veTable"));
+
+    // Saving serializes the edited working tune.
+    let saved = http
+        .get(format!("{base}/msq/save"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let reparsed = tune_model::msq::parse(&saved).unwrap();
+    match reparsed.constants.get("reqFuel") {
+        Some(tune_model::MsqValue::Num(v)) => assert!((v - 8.5).abs() < 1e-9, "{v}"),
+        other => panic!("reqFuel in saved msq: {other:?}"),
+    }
+
+    // No serial: burn refuses, and connecting can't silently discard the
+    // unsaved offline edits (guarded before the port is even opened).
+    let resp = http
+        .post(format!("{base}/tune/burn"))
+        .header("X-Client-Id", "offline-client")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 409);
+    let resp = http
+        .post(format!("{base}/connect"))
+        .json(&serde_json::json!({ "port": "/dev/nonexistent-rustytune", "mode": "primary" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 409);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        body["error"].as_str().unwrap().contains("unsaved"),
+        "{body}"
+    );
+
+    // Close: back to the no-tune state; the uploaded file survives, so the
+    // session can reopen (fresh copy, edits gone).
+    let closed: serde_json::Value = http
+        .post(format!("{base}/offline/close"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(closed["offline"], false);
+    assert_eq!(closed["tuneLoaded"], false);
+    let tune: serde_json::Value = http
+        .get(format!("{base}/tune"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tune["loaded"], false);
+
+    let reopened: serde_json::Value = http
+        .post(format!("{base}/offline"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reopened["status"]["offline"], true);
+    let constants: serde_json::Value = http
+        .get(format!("{base}/tune/constants?names=reqFuel"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(constants[0]["value"], 7.9, "reopen restores file values");
+}

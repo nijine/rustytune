@@ -13,7 +13,9 @@ watch the INI-defined gauges live, record MegaLogViewer `.msl` datalogs,
 edit VE/ignition/AFR tables in the browser (live `M` writes,
 CRC-verified), edit every settings dialog the INI defines (acceleration
 enrichment, idle, fan, launch, boost, ...), burn to EEPROM, and diff the
-ECU against a TunerStudio `.msq` — with selective apply and save.
+ECU against a TunerStudio `.msq` — with selective apply and save. No ECU
+around? Open a `.msq` offline and edit it with the same table/settings UI,
+then save it back out.
 
 ## Architecture
 

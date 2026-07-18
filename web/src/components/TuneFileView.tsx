@@ -1,9 +1,15 @@
 // Tune File tab: open a TunerStudio .msq, see exactly what differs from
 // the ECU (and where), selectively push file values, save the ECU state
-// back out as .msq.
+// back out as .msq. With no ECU, an opened file can be edited offline:
+// the full table/settings UI against the file contents, saved back out.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type DiffEntryJson, type MsqDiffJson } from "../api";
+import {
+  api,
+  type DiffEntryJson,
+  type MsqDiffJson,
+  type MsqMeta,
+} from "../api";
 import type { TelemetryFeed } from "../feed";
 
 function fmt(v: number | string | null | undefined): string {
@@ -32,10 +38,15 @@ function CellsDetail({ entry }: { entry: DiffEntryJson }) {
 export default function TuneFileView({
   feed,
   tuneLoaded,
+  offline,
 }: {
   feed: TelemetryFeed;
   tuneLoaded: boolean;
+  offline: boolean;
 }) {
+  // Uploaded-file metadata; the source for "Edit offline" before any tune
+  // is loaded.
+  const [meta, setMeta] = useState<MsqMeta | null>(null);
   const [diff, setDiff] = useState<MsqDiffJson | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -53,12 +64,20 @@ export default function TuneFileView({
         setChecked(new Set(d.entries.map((e) => e.name)));
       })
       .catch((e: Error) => {
-        if (!e.message.includes("no .msq uploaded")) setError(e.message);
+        if (
+          !e.message.includes("no .msq uploaded") &&
+          !e.message.includes("tune not loaded")
+        ) {
+          setError(e.message);
+        }
       });
   }, []);
 
-  // The server may already hold an uploaded file (page reload); pick it up.
-  useEffect(refresh, [refresh]);
+  // The server may already hold an uploaded file (page reload); pick it up
+  // once a tune exists to diff against.
+  useEffect(() => {
+    if (tuneLoaded) refresh();
+  }, [tuneLoaded, refresh]);
 
   // Edits elsewhere (table editor, another client) change the diff; refetch
   // shortly after the dust settles.
@@ -78,13 +97,47 @@ export default function TuneFileView({
     try {
       const buffer = await file.arrayBuffer();
       const content = new TextDecoder("iso-8859-1").decode(buffer);
-      await api.msqUpload(file.name, content);
-      refresh();
+      const uploaded = await api.msqUpload(file.name, content);
+      setMeta(uploaded);
+      setError(null);
+      if (tuneLoaded) refresh();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
+  };
+
+  const editOffline = () => {
+    setBusy(true);
+    api
+      .offlineOpen()
+      .then((r) => {
+        setError(null);
+        setNotice(
+          `editing ${meta?.filename ?? "tune"} offline — ${r.applied} constants loaded` +
+            (r.skipped.length ? `, ${r.skipped.length} skipped` : ""),
+        );
+        refresh();
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  const closeOffline = () => {
+    if (!window.confirm("Close the offline session? Unsaved changes are lost.")) {
+      return;
+    }
+    setBusy(true);
+    api
+      .offlineClose()
+      .then(() => {
+        setDiff(null);
+        setNotice(null);
+        setError(null);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
   };
 
   const apply = (names?: string[]) => {
@@ -114,10 +167,49 @@ export default function TuneFileView({
 
   if (!tuneLoaded) {
     return (
-      <p className="muted center-note">
-        Tune not loaded — connect over USB (primary serial) to compare and
-        apply tune files.
-      </p>
+      <div className="tunefile">
+        <div className="tune-bar">
+          <label className="file-btn">
+            Open .msq…
+            <input
+              type="file"
+              accept=".msq,application/xml"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void openFile(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {meta && (
+            <button className="primary" disabled={busy} onClick={editOffline}>
+              Edit offline
+            </button>
+          )}
+          {error && <span className="error">{error}</span>}
+        </div>
+        {meta ? (
+          <div className="msq-meta">
+            <span>
+              <strong>{meta.filename}</strong>
+              {meta.writeDate ? ` · saved ${meta.writeDate}` : ""}
+              {meta.author ? ` · ${meta.author}` : ""} · {meta.constants}{" "}
+              constants
+            </span>
+            {!meta.signatureMatch && (
+              <span className="warn-pill">
+                file is for “{meta.signature}” — this definition differs;
+                unmatched settings are skipped
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="muted center-note">
+            No ECU connected — open a .msq to edit it offline, or connect
+            over USB (primary serial) to compare and apply tune files.
+          </p>
+        )}
+      </div>
     );
   }
 
@@ -137,8 +229,13 @@ export default function TuneFileView({
           />
         </label>
         <a className="button-link" href="/api/msq/save" download>
-          Save ECU tune as .msq
+          {offline ? "Save tune as .msq" : "Save ECU tune as .msq"}
         </a>
+        {offline && (
+          <button className="ghost" disabled={busy} onClick={closeOffline}>
+            Close offline session
+          </button>
+        )}
         {diff && (
           <button className="ghost" disabled={busy} onClick={refresh}>
             ⟳ Refresh diff
@@ -166,7 +263,8 @@ export default function TuneFileView({
 
           {diff.entries.length === 0 ? (
             <p className="ok-note">
-              ✓ No differences — the ECU matches the file
+              ✓ No differences — the {offline ? "working tune" : "ECU"}{" "}
+              matches the file
               {diff.onlyInFile.length > 0
                 ? ` (${diff.onlyInFile.length} file-only settings not comparable)`
                 : ""}
@@ -195,7 +293,7 @@ export default function TuneFileView({
                   disabled={busy || checked.size === 0}
                   onClick={() => apply([...checked])}
                 >
-                  Apply {checked.size} selected to ECU
+                  Apply {checked.size} selected{offline ? "" : " to ECU"}
                 </button>
               </div>
               <div className="diff-scroll">
@@ -267,7 +365,9 @@ export default function TuneFileView({
 
       {!diff && (
         <p className="muted center-note">
-          Open a .msq tune file to compare it against what's on the ECU.
+          {offline
+            ? "Editing offline — use the Tuning and Settings tabs, then save your work as .msq. Open another .msq here to compare against it."
+            : "Open a .msq tune file to compare it against what's on the ECU."}
         </p>
       )}
     </div>

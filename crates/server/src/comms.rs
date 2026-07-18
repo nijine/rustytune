@@ -69,6 +69,8 @@ pub struct Status {
     pub ecu_signature: Option<String>,
     /// All tune pages downloaded and CRC-verified.
     pub tune_loaded: bool,
+    /// Editing an opened .msq with no ECU — tune loaded, no serial.
+    pub offline: bool,
     pub last_error: Option<String>,
     pub log: Option<LogStatus>,
 }

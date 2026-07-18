@@ -169,6 +169,16 @@ impl Tune {
         }
     }
 
+    /// Make the shadows agree with the local data on every page. For
+    /// offline (.msq) sessions where there is no ECU: afterwards `dirty`
+    /// means "changed since the file was opened/saved".
+    pub fn sync_shadows(&mut self) {
+        for page in &mut self.pages {
+            page.ecu = page.data.clone();
+            page.burned = page.data.clone();
+        }
+    }
+
     /// The ECU answered a `d` CRC that doesn't match what we think it has;
     /// resync our shadow (pending edits stay pending).
     pub fn resync_ecu(&mut self, page_idx: usize, bytes: &[u8]) {

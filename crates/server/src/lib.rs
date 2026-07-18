@@ -81,6 +81,8 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/tune/constants", get(api::tune_constants))
         .route("/api/tune/constant/{name}", post(api::tune_set_constant))
         .route("/api/tune/burn", post(api::tune_burn))
+        .route("/api/offline", post(api::offline_open))
+        .route("/api/offline/close", post(api::offline_close))
         .route("/api/msq", post(api::msq_upload))
         .route("/api/msq/diff", get(api::msq_diff))
         .route("/api/msq/apply", post(api::msq_apply))

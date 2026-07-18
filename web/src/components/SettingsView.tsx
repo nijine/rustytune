@@ -155,9 +155,11 @@ function MenuEntryButton({
 export default function SettingsView({
   feed,
   tuneLoaded,
+  offline,
 }: {
   feed: TelemetryFeed;
   tuneLoaded: boolean;
+  offline: boolean;
 }) {
   const [menus, setMenus] = useState<MenuJson[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -234,7 +236,8 @@ export default function SettingsView({
   if (!tuneLoaded) {
     return (
       <p className="muted center-note">
-        Tune not loaded — connect over USB (primary serial) to edit settings.
+        Tune not loaded — connect over USB (primary serial) to edit
+        settings, or open a .msq offline from the Tune File tab.
       </p>
     );
   }
@@ -280,18 +283,28 @@ export default function SettingsView({
       <section className="settings-form">
         <div className="tune-bar">
           {dialog && <h2>{dialog.title || dialog.name}</h2>}
-          {tuneState?.dirty && <span className="pill sending">sending…</span>}
-          <button
-            className={tuneState?.burnPending ? "burn-needed" : "ghost"}
-            disabled={burning || !tuneState?.burnPending}
-            onClick={burn}
-          >
-            {burning
-              ? "Burning…"
-              : tuneState?.burnPending
-                ? "Burn to ECU"
-                : "Burned"}
-          </button>
+          {tuneState?.dirty && (
+            <span className="pill sending">
+              {offline ? "unsaved changes" : "sending…"}
+            </span>
+          )}
+          {offline ? (
+            <a className="button-link" href="/api/msq/save" download>
+              Save tune as .msq
+            </a>
+          ) : (
+            <button
+              className={tuneState?.burnPending ? "burn-needed" : "ghost"}
+              disabled={burning || !tuneState?.burnPending}
+              onClick={burn}
+            >
+              {burning
+                ? "Burning…"
+                : tuneState?.burnPending
+                  ? "Burn to ECU"
+                  : "Burned"}
+            </button>
+          )}
           {error && <span className="error">{error}</span>}
           {notice && <span className="warn-note">⚡ {notice}</span>}
         </div>
