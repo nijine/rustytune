@@ -2,6 +2,7 @@
 name = "ecu-proto"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Speeduino serial protocols: TunerStudio Protocol 3 envelope and secondary serial"
 
 [dependencies]

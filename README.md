@@ -78,3 +78,19 @@ the car — only the transport endpoint differs.
 parser is developed and golden-tested against. At runtime the server loads
 the INI matching your firmware, so a firmware update is a new INI file, not
 a code change.
+
+## License
+
+rustytune is free software: **GPL-3.0-or-later**, with one addition —
+an [App Store additional permission](LICENSE-EXCEPTION.md) (GPLv3 §7)
+that allows conveying builds through app stores whose terms would
+otherwise conflict with the GPL, as long as full source stays publicly
+available under this same license. See [LICENSE](LICENSE) and
+[LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md).
+
+Contributions are accepted under the same terms with a DCO sign-off —
+see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The reference INI in `fixtures/` originates from the
+[Speeduino](https://speeduino.com) project and remains under
+Speeduino's own license; it is not part of rustytune's license grant.
