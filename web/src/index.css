@@ -822,9 +822,10 @@ button.burn-needed {
 }
 
 .log-channels {
-  flex: 0 0 190px;
+  flex: 0 0 215px;
   max-height: 70vh;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -834,8 +835,8 @@ button.burn-needed {
   gap: 2px;
 }
 
-.log-channels input[type="text"],
 .log-channels > input {
+  width: 100%;
   margin-bottom: 8px;
   font-size: 0.8rem;
 }
@@ -849,6 +850,14 @@ button.burn-needed {
   padding: 2px 2px;
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* The global `input { width: 180px }` would stretch the checkboxes and
+   push the labels out of the panel. */
+.log-channel input {
+  width: auto;
+  margin: 0;
+  flex: none;
 }
 
 .log-charts {
