@@ -276,6 +276,104 @@ async fn browser_workflow() {
         .unwrap();
     assert_eq!(tune["burnPending"], false);
 
+    // Settings dialogs: the INI's [Menu] tree resolves to [UserDefined]
+    // forms with live values and evaluated enable conditions.
+    let menus: serde_json::Value = http
+        .get(format!("{base}/tune/menus"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let startup = menus
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["title"] == "Startup/Idle")
+        .expect("Startup/Idle menu");
+    let idle_entry = startup["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == "idleSettings")
+        .expect("idleSettings entry");
+    assert_eq!(idle_entry["type"], "dialog");
+    assert_eq!(idle_entry["label"], "Idle Control");
+
+    let dialog: serde_json::Value = http
+        .get(format!("{base}/tune/dialog/idleSettings"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(dialog["title"], "Idle Settings");
+    let items = dialog["items"].as_array().unwrap();
+    let algo = items
+        .iter()
+        .find(|i| i["type"] == "constant" && i["constant"]["name"] == "iacAlgorithm")
+        .expect("iacAlgorithm field");
+    assert_eq!(algo["label"], "Idle control type");
+    assert!(!algo["constant"]["labels"].as_array().unwrap().is_empty());
+    assert!(
+        items.iter().any(|i| i["type"] == "panel"),
+        "idleSettings must embed its sub-panels"
+    );
+
+    // "Crank to run taper" is enable-gated on iacAlgorithm ∈ {2,4,5,7};
+    // set the algorithm through the same constants endpoint the form uses
+    // and watch the flag flip.
+    let taper_enabled = |dialog: &serde_json::Value| {
+        dialog["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["type"] == "constant" && i["constant"]["name"] == "idleTaperTime")
+            .map(|i| i["enabled"] == true)
+    };
+    for (algo, expect) in [(2.0, true), (1.0, false)] {
+        let resp = http
+            .post(format!("{base}/tune/constant/iacAlgorithm"))
+            .header("X-Client-Id", "client-a")
+            .json(&serde_json::json!({ "value": algo }))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success());
+        let dialog: serde_json::Value = http
+            .get(format!("{base}/tune/dialog/idleSettings"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            taper_enabled(&dialog),
+            Some(expect),
+            "idleTaperTime gate at iacAlgorithm={algo}"
+        );
+    }
+    // Wait for the settings writes to flush so later dirty checks are clean.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let tune: serde_json::Value = http
+            .get(format!("{base}/tune"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if tune["dirty"] == false {
+            break;
+        }
+        assert!(Instant::now() < deadline, "settings edit never flushed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
     // .msq upload: the real TunerStudio file (202501) against the 202405-dev
     // definition — diff still works name-wise, mismatch is surfaced.
     let msq_content =

@@ -18,7 +18,7 @@ use axum::{
 use ecu_proto::{Config, Mode, SerialTransport, Session};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
-use ts_ini::Value;
+use ts_ini::{DialogItem, MenuItem, Value};
 use tune_model::Tune;
 
 use crate::comms::{self, Cmd, CommsCtx, CommsHandle, Status};
@@ -575,6 +575,182 @@ pub async fn tune_set_constant(
         Some(c) => Json(c).into_response(),
         None => err(StatusCode::INTERNAL_SERVER_ERROR, "constant vanished").into_response(),
     }
+}
+
+// ----- INI settings dialogs: menu tree + generated forms --------------------
+
+/// Evaluate an optional enable/visible condition against the live tune.
+/// Unresolvable conditions default to `true` — never hide a setting we
+/// can't reason about.
+fn truthy(cond: Option<&ts_ini::Expr>, tune: &Tune) -> bool {
+    match cond {
+        None => true,
+        Some(e) => match e.eval(tune) {
+            Ok(Value::Num(n)) => n != 0.0,
+            Ok(Value::Str(s)) => !s.is_empty(),
+            Err(_) => true,
+        },
+    }
+}
+
+/// A [Menu] entry, classified by what its target resolves to; `None` for
+/// TunerStudio built-ins (`std_*`) and 3D map views we don't serve.
+fn menu_entry_json(
+    state: &AppState,
+    tune: &Tune,
+    e: &ts_ini::MenuEntry,
+) -> Option<serde_json::Value> {
+    let kind = if state.def.dialogs.contains_key(&e.target) {
+        "dialog"
+    } else if state.def.tables.contains_key(&e.target) {
+        "table"
+    } else if state.def.curves.contains_key(&e.target) {
+        "curve"
+    } else {
+        return None;
+    };
+    Some(serde_json::json!({
+        "type": kind,
+        "name": e.target,
+        "label": e.label,
+        "enabled": truthy(e.enable.as_ref(), tune),
+    }))
+}
+
+pub async fn tune_menus(State(state): State<SharedState>) -> Response {
+    let tune = state.tune.lock().unwrap();
+    if !tune.loaded() {
+        return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+    }
+    let menus: Vec<serde_json::Value> = state
+        .def
+        .menus
+        .iter()
+        .filter_map(|menu| {
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            for item in &menu.items {
+                match item {
+                    MenuItem::Entry(e) => items.extend(menu_entry_json(&state, &tune, e)),
+                    MenuItem::Group { label, children } => {
+                        let kids: Vec<serde_json::Value> = children
+                            .iter()
+                            .filter_map(|e| menu_entry_json(&state, &tune, e))
+                            .collect();
+                        if !kids.is_empty() {
+                            items.push(serde_json::json!({
+                                "type": "group", "label": label, "items": kids,
+                            }));
+                        }
+                    }
+                    // Only between surviving entries, never doubled.
+                    MenuItem::Separator => {
+                        if matches!(items.last(), Some(v) if v["type"] != "separator") {
+                            items.push(serde_json::json!({ "type": "separator" }));
+                        }
+                    }
+                }
+            }
+            while matches!(items.last(), Some(v) if v["type"] == "separator") {
+                items.pop();
+            }
+            (!items.is_empty()).then(|| serde_json::json!({ "title": menu.title, "items": items }))
+        })
+        .collect();
+    Json(menus).into_response()
+}
+
+/// Flatten a dialog's fields and nested panels into renderable form rows.
+/// `visited` holds the ancestor chain to break panel cycles.
+fn dialog_items(
+    state: &AppState,
+    tune: &Tune,
+    dialog: &ts_ini::DialogDef,
+    visited: &mut Vec<String>,
+) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    for item in &dialog.items {
+        match item {
+            DialogItem::Field {
+                label,
+                constant,
+                enable,
+                visible,
+            } => {
+                if !truthy(visible.as_ref(), tune) {
+                    continue;
+                }
+                match constant {
+                    None => {
+                        // `#` marks a TS bold header; blank labels are spacers.
+                        let text = label.trim_start_matches(['#', '!']).trim();
+                        if !text.is_empty() {
+                            out.push(serde_json::json!({ "type": "header", "label": text }));
+                        }
+                    }
+                    Some(name) => match constant_json(state, tune, name) {
+                        Some(cj) => out.push(serde_json::json!({
+                            "type": "constant",
+                            "label": label,
+                            "enabled": truthy(enable.as_ref(), tune),
+                            "constant": cj,
+                        })),
+                        // PcVariables and channels aren't editable tune bytes.
+                        None => out.push(serde_json::json!({
+                            "type": "unsupported", "label": label, "name": name,
+                        })),
+                    },
+                }
+            }
+            DialogItem::Panel { target, enable } => {
+                if visited.iter().any(|v| v == target) {
+                    continue;
+                }
+                if let Some(sub) = state.def.dialogs.get(target) {
+                    visited.push(target.clone());
+                    let items = dialog_items(state, tune, sub, visited);
+                    visited.pop();
+                    if !items.is_empty() {
+                        out.push(serde_json::json!({
+                            "type": "panel",
+                            "name": target,
+                            "title": sub.title,
+                            "enabled": truthy(enable.as_ref(), tune),
+                            "items": items,
+                        }));
+                    }
+                } else if let Some(curve) = state.def.curves.get(target) {
+                    out.push(serde_json::json!({
+                        "type": "curve", "name": target, "title": curve.title,
+                    }));
+                } else if let Some(table) = state.def.tables.get(target) {
+                    out.push(serde_json::json!({
+                        "type": "table", "name": target, "title": table.title,
+                    }));
+                }
+                // Live graphs and other visual panel targets: skipped.
+            }
+        }
+    }
+    out
+}
+
+pub async fn tune_dialog(State(state): State<SharedState>, Path(name): Path<String>) -> Response {
+    let tune = state.tune.lock().unwrap();
+    if !tune.loaded() {
+        return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+    }
+    let Some(dialog) = state.def.dialogs.get(&name) else {
+        return err(StatusCode::NOT_FOUND, format!("no dialog `{name}`")).into_response();
+    };
+    let mut visited = vec![name.clone()];
+    let items = dialog_items(&state, &tune, dialog, &mut visited);
+    Json(serde_json::json!({
+        "name": dialog.name,
+        "title": dialog.title,
+        "help": dialog.topic_help,
+        "items": items,
+    }))
+    .into_response()
 }
 
 // ----- .msq reference file: upload, diff, selective apply, save -------------

@@ -106,6 +106,44 @@ export interface ConstantJson {
   requiresPowerCycle: boolean;
 }
 
+export interface MenuEntryJson {
+  type: "dialog" | "table" | "curve";
+  name: string;
+  label: string;
+  enabled: boolean;
+}
+
+export type MenuItemJson =
+  | MenuEntryJson
+  | { type: "separator" }
+  | { type: "group"; label: string; items: MenuEntryJson[] };
+
+export interface MenuJson {
+  title: string;
+  items: MenuItemJson[];
+}
+
+export type DialogItemJson =
+  | { type: "header"; label: string }
+  | { type: "constant"; label: string; enabled: boolean; constant: ConstantJson }
+  | {
+      type: "panel";
+      name: string;
+      title: string;
+      enabled: boolean;
+      items: DialogItemJson[];
+    }
+  | { type: "curve"; name: string; title: string }
+  | { type: "table"; name: string; title: string }
+  | { type: "unsupported"; label: string; name: string };
+
+export interface DialogJson {
+  name: string;
+  title: string;
+  help: string | null;
+  items: DialogItemJson[];
+}
+
 export interface MsqMeta {
   filename: string;
   signature: string | null;
@@ -193,6 +231,8 @@ export const api = {
     request<ConstantJson[]>(`/api/tune/constants?names=${names.join(",")}`),
   setConstant: (name: string, value: number) =>
     post<ConstantJson>(`/api/tune/constant/${name}`, { value }),
+  menus: () => request<MenuJson[]>("/api/tune/menus"),
+  dialog: (name: string) => request<DialogJson>(`/api/tune/dialog/${name}`),
   burn: () => post<{ burnedPages: number[] }>("/api/tune/burn"),
   msqUpload: (filename: string, content: string) =>
     post<MsqMeta>("/api/msq", { filename, content }),

@@ -7,8 +7,10 @@
 //! LAMBDA, mcu_*, ... — matching TunerStudio project settings), then typed
 //! per-section parsers over the surviving lines.
 //!
-//! Sections outside the tuning MVP ([Menu], [UserDefined], [VeAnalyze],
-//! [LoggerDefinition], ...) are skipped, not parsed.
+//! Sections outside the tuning MVP ([VeAnalyze], [LoggerDefinition],
+//! [ControllerCommands], ...) are skipped, not parsed. [Menu] and
+//! [UserDefined] are parsed into a menu tree + dialog forms (fields,
+//! sliders, nested panels); purely visual dialog elements are dropped.
 
 use std::collections::HashSet;
 
@@ -88,6 +90,8 @@ pub fn parse_with_symbols(src: &str, symbols: &HashSet<String>) -> Result<IniDef
             "GaugeConfigurations" => sections::gauge_configurations(lines, &mut ctx)?,
             "FrontPage" => sections::front_page(lines, &mut ctx)?,
             "Datalog" => sections::datalog(lines, &mut ctx)?,
+            "Menu" => sections::menu(lines, &mut ctx)?,
+            "UserDefined" => sections::user_defined(lines, &mut ctx)?,
             // Known sections we deliberately skip in the MVP.
             _ => {}
         }

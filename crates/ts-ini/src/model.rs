@@ -266,6 +266,64 @@ pub struct DatalogEntry {
     pub condition: Option<Expr>,
 }
 
+/// One clickable [Menu] entry. `target` names a dialog, table, curve, or a
+/// TunerStudio built-in editor (`std_*`); classification happens at lookup.
+#[derive(Debug, Clone)]
+pub struct MenuEntry {
+    pub target: String,
+    pub label: String,
+    /// Grey the entry out unless this evaluates truthy.
+    pub enable: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MenuItem {
+    Entry(MenuEntry),
+    Separator,
+    /// `groupMenu` with its `groupChildMenu` children.
+    Group {
+        label: String,
+        children: Vec<MenuEntry>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct MenuDef {
+    /// Menu-bar title with the `&` mnemonic marker stripped.
+    pub title: String,
+    pub items: Vec<MenuItem>,
+}
+
+/// [UserDefined] dialog elements we can render as a settings form. Purely
+/// visual/interactive elements (gauges, live graphs, command buttons, ...)
+/// are skipped at parse time.
+#[derive(Debug, Clone)]
+pub enum DialogItem {
+    /// `field`/`slider`. `constant: None` is a header or spacer row.
+    Field {
+        label: String,
+        constant: Option<String>,
+        /// Grey out unless truthy.
+        enable: Option<Expr>,
+        /// Hide entirely unless truthy.
+        visible: Option<Expr>,
+    },
+    /// Embedded sub-dialog (or curve/table editor) by name.
+    Panel {
+        target: String,
+        enable: Option<Expr>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct DialogDef {
+    pub name: String,
+    pub title: String,
+    pub items: Vec<DialogItem>,
+    pub topic_help: Option<String>,
+    pub line: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct SettingGroup {
     pub keyword: String,
@@ -299,6 +357,8 @@ pub struct IniDef {
     pub gauges: IndexMap<String, GaugeDef>,
     pub front_page: FrontPage,
     pub datalog: Vec<DatalogEntry>,
+    pub menus: Vec<MenuDef>,
+    pub dialogs: IndexMap<String, DialogDef>,
     /// Non-fatal oddities encountered while parsing.
     pub warnings: Vec<String>,
 }

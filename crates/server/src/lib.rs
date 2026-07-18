@@ -74,6 +74,8 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/tune", get(api::tune_summary))
         .route("/api/tune/table/{id}", get(api::tune_table))
         .route("/api/tune/table/{id}/cells", post(api::tune_table_cells))
+        .route("/api/tune/menus", get(api::tune_menus))
+        .route("/api/tune/dialog/{name}", get(api::tune_dialog))
         .route("/api/tune/constants", get(api::tune_constants))
         .route("/api/tune/constant/{name}", post(api::tune_set_constant))
         .route("/api/tune/burn", post(api::tune_burn))

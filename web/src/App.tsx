@@ -4,6 +4,7 @@ import { TelemetryFeed } from "./feed";
 import ConnectBar from "./components/ConnectBar";
 import Gauge from "./components/Gauge";
 import Indicators from "./components/Indicators";
+import SettingsView from "./components/SettingsView";
 import TuneFileView from "./components/TuneFileView";
 import TuneView from "./components/TuneView";
 
@@ -12,7 +13,9 @@ export default function App() {
   const [definition, setDefinition] = useState<Definition | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"dash" | "tune" | "file">("dash");
+  const [tab, setTab] = useState<"dash" | "tune" | "settings" | "file">(
+    "dash",
+  );
 
   useEffect(() => {
     api
@@ -52,6 +55,12 @@ export default function App() {
               Tuning
             </button>
             <button
+              className={tab === "settings" ? "tab active" : "tab"}
+              onClick={() => setTab("settings")}
+            >
+              Settings
+            </button>
+            <button
               className={tab === "file" ? "tab active" : "tab"}
               onClick={() => setTab("file")}
             >
@@ -69,6 +78,9 @@ export default function App() {
             </>
           )}
           {tab === "tune" && <TuneView feed={feed} />}
+          {tab === "settings" && (
+            <SettingsView feed={feed} tuneLoaded={status?.tuneLoaded ?? false} />
+          )}
           {tab === "file" && (
             <TuneFileView feed={feed} tuneLoaded={status?.tuneLoaded ?? false} />
           )}

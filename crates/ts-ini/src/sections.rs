@@ -3,7 +3,7 @@
 use indexmap::IndexMap;
 
 use crate::Error;
-use crate::expr;
+use crate::expr::{self, Expr};
 use crate::lex::{Shape, Token, parse_shape, split_kv, tokenize};
 use crate::model::*;
 use crate::preprocess::Line;
@@ -695,6 +695,206 @@ pub fn datalog(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
             format: str_tok(&tokens, 3, line.num)?,
             condition,
         });
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------------------- Menu
+
+/// The `{ expr }` tokens of a menu/dialog line in order, each parsed.
+/// Empty `{}` slots and parse failures (warned) yield `None` — the item
+/// then defaults to enabled/visible.
+fn conditions(tokens: &[Token], num: u32, ctx: &mut Ctx) -> Vec<Option<Expr>> {
+    let srcs: Vec<&str> = tokens
+        .iter()
+        .filter_map(|t| match t {
+            Token::Expr(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect();
+    srcs.into_iter()
+        .map(|src| {
+            if src.is_empty() {
+                return None;
+            }
+            match expr::parse(src, num) {
+                Ok(e) => Some(e),
+                Err(e) => {
+                    ctx.warn(num, format!("unparsable condition: {e}"));
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn first_condition(tokens: &[Token], num: u32, ctx: &mut Ctx) -> Option<Expr> {
+    conditions(tokens, num, ctx).into_iter().flatten().next()
+}
+
+/// `target[, "Label"][, page][, { enable }]`. Tolerates the fixture's
+/// missing-comma lines (`dwell_tblMap "Dwell Map"`) by splitting the first
+/// token; the optional std-editor page number is ignored.
+fn menu_entry(tokens: &[Token], num: u32, ctx: &mut Ctx) -> Option<MenuEntry> {
+    let first = match tokens.first() {
+        Some(Token::Bare(s)) if !s.is_empty() => s.clone(),
+        _ => {
+            ctx.warn(num, "menu entry without a target");
+            return None;
+        }
+    };
+    let (target, inline_label) = match first.split_once('"') {
+        Some((t, rest)) => (
+            t.trim().to_string(),
+            Some(rest.trim_end_matches('"').to_string()),
+        ),
+        None => (first, None),
+    };
+    let label = inline_label
+        .or_else(|| {
+            tokens.iter().find_map(|t| match t {
+                Token::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+        })
+        .unwrap_or_else(|| target.clone());
+    Some(MenuEntry {
+        target,
+        label,
+        enable: first_condition(&tokens[1..], num, ctx),
+    })
+}
+
+pub fn menu(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
+    for line in lines {
+        let Some((key, tokens)) = kv(line, ctx) else {
+            continue;
+        };
+        match key {
+            // Single-controller INIs only use the "main" menu dialog.
+            "menuDialog" => {}
+            "menu" => ctx.def.menus.push(MenuDef {
+                title: str_tok(&tokens, 0, line.num)?.replace('&', ""),
+                items: Vec::new(),
+            }),
+            "subMenu" | "groupMenu" | "groupChildMenu" => {
+                let Some(menu) = ctx.def.menus.last_mut() else {
+                    ctx.warn(line.num, format!("`{key}` before any `menu`"));
+                    continue;
+                };
+                if key == "groupMenu" {
+                    menu.items.push(MenuItem::Group {
+                        label: str_tok(&tokens, 0, line.num)?,
+                        children: Vec::new(),
+                    });
+                    continue;
+                }
+                // Borrow of ctx ends here so menu_entry can warn.
+                let menu_idx = ctx.def.menus.len() - 1;
+                if matches!(tokens.first(), Some(Token::Bare(s)) if s == "std_separator") {
+                    ctx.def.menus[menu_idx].items.push(MenuItem::Separator);
+                    continue;
+                }
+                let Some(entry) = menu_entry(&tokens, line.num, ctx) else {
+                    continue;
+                };
+                let items = &mut ctx.def.menus[menu_idx].items;
+                if key == "groupChildMenu" {
+                    match items.last_mut() {
+                        Some(MenuItem::Group { children, .. }) => children.push(entry),
+                        _ => ctx.warn(line.num, "`groupChildMenu` outside a `groupMenu`"),
+                    }
+                } else {
+                    items.push(MenuItem::Entry(entry));
+                }
+            }
+            _ => ctx.warn(line.num, format!("unknown [Menu] key `{key}`")),
+        }
+    }
+    Ok(())
+}
+
+// -------------------------------------------------------------- UserDefined
+
+pub fn user_defined(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
+    for line in lines {
+        let Some((key, tokens)) = kv(line, ctx) else {
+            continue;
+        };
+        match key {
+            "dialog" => {
+                let name = str_tok(&tokens, 0, line.num)?;
+                let title = tokens
+                    .iter()
+                    .find_map(|t| match t {
+                        Token::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                ctx.def.dialogs.insert(
+                    name.clone(),
+                    DialogDef {
+                        name,
+                        title,
+                        items: Vec::new(),
+                        topic_help: None,
+                        line: line.num,
+                    },
+                );
+            }
+            "field" | "slider" | "panel" | "topicHelp" => {
+                if ctx.def.dialogs.last().is_none() {
+                    ctx.warn(line.num, format!("`{key}` before any `dialog`"));
+                    continue;
+                }
+                let item = match key {
+                    "field" | "slider" => {
+                        let label = str_tok(&tokens, 0, line.num).unwrap_or_default();
+                        // The constant is the next bare word; sliders also
+                        // carry a bare orientation token after it.
+                        let constant = match tokens.get(1) {
+                            Some(Token::Bare(s)) if !s.is_empty() => Some(s.clone()),
+                            _ => None,
+                        };
+                        // field = label, name, { enable }, { visible }
+                        let mut conds = conditions(&tokens[1..], line.num, ctx).into_iter();
+                        let enable = conds.next().flatten();
+                        let visible = conds.next().flatten();
+                        Some(DialogItem::Field {
+                            label,
+                            constant,
+                            enable,
+                            visible,
+                        })
+                    }
+                    "panel" => match tokens.first() {
+                        Some(Token::Bare(s)) if !s.is_empty() => Some(DialogItem::Panel {
+                            target: s.clone(),
+                            enable: first_condition(&tokens[1..], line.num, ctx),
+                        }),
+                        _ => {
+                            ctx.warn(line.num, "panel without a target");
+                            None
+                        }
+                    },
+                    _ => {
+                        let help = str_tok(&tokens, 0, line.num).ok();
+                        let (_, dialog) = ctx.def.dialogs.last_mut().unwrap();
+                        dialog.topic_help = help;
+                        None
+                    }
+                };
+                if let Some(item) = item {
+                    let (_, dialog) = ctx.def.dialogs.last_mut().unwrap();
+                    dialog.items.push(item);
+                }
+            }
+            // Visual/interactive elements a settings form can't represent.
+            "displayOnlyField" | "commandButton" | "gauge" | "liveGraph" | "graphLine"
+            | "indicator" | "indicatorPanel" | "text" | "settingSelector" | "settingOption"
+            | "radio" | "help" | "webHelp" => {}
+            _ => ctx.warn(line.num, format!("unknown [UserDefined] key `{key}`")),
+        }
     }
     Ok(())
 }

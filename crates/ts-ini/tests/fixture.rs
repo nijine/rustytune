@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 
 use ts_ini::{
-    ConstantClass, DataType, IniDef, NumOrExpr, OutputChannel, Shape, SymbolSource, Value,
+    ConstantClass, DataType, DialogItem, IniDef, MenuItem, NumOrExpr, OutputChannel, Shape,
+    SymbolSource, Value,
 };
 
 const FIXTURE: &str = include_str!("../../../fixtures/speeduino202405_dev.ini");
@@ -400,4 +401,86 @@ fn setting_groups_parsed() {
         .expect("mcu setting group");
     assert_eq!(mcu.options.len(), 3);
     assert_eq!(mcu.options[1].0, "mcu_teensy");
+}
+
+#[test]
+fn menus_and_dialogs_golden() {
+    let def = parse_default();
+
+    let titles: Vec<&str> = def.menus.iter().map(|m| m.title.as_str()).collect();
+    assert!(titles.contains(&"Tuning"), "menus: {titles:?}");
+    assert!(titles.contains(&"Startup/Idle"));
+    assert!(titles.contains(&"Accessories"));
+
+    // "&Tuning" has its mnemonic stripped and links Acceleration Enrichment.
+    let tuning = def.menus.iter().find(|m| m.title == "Tuning").unwrap();
+    let accel = tuning
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MenuItem::Entry(e) if e.target == "accelEnrichments" => Some(e),
+            _ => None,
+        })
+        .expect("accelEnrichments entry");
+    assert_eq!(accel.label, "Acceleration Enrichment");
+
+    // groupMenu "Engine Protection" collects its children.
+    let protection = tuning
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MenuItem::Group { label, children } if label == "Engine Protection" => Some(children),
+            _ => None,
+        })
+        .expect("Engine Protection group");
+    assert_eq!(protection.len(), 5);
+    assert!(
+        protection[1].enable.is_some(),
+        "Rev Limiters gated on engineProtectType"
+    );
+
+    // idleSettings: field with combo constant, enable-gated field, panels.
+    let idle = &def.dialogs["idleSettings"];
+    assert_eq!(idle.title, "Idle Settings");
+    let mut fields = idle.items.iter();
+    let has = |target: &str, d: &ts_ini::DialogDef| {
+        d.items
+            .iter()
+            .any(|i| matches!(i, DialogItem::Panel { target: t, .. } if t == target))
+    };
+    assert!(has("pwm_idle", idle) && has("stepper_idle", idle) && has("closedloop_idle", idle));
+    assert!(fields.any(|i| matches!(
+        i,
+        DialogItem::Field { label, constant: Some(c), .. }
+            if label == "Idle control type" && c == "iacAlgorithm"
+    )));
+
+    // field = label, name, {}, { visible } keeps the second slot as visible.
+    let aux = &def.dialogs["Auxinput_pin_selection"];
+    let vis_gated = aux
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                DialogItem::Field {
+                    enable: None,
+                    visible: Some(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert!(
+        vis_gated >= 16,
+        "visibility-gated aux fields, got {vis_gated}"
+    );
+
+    // Header rows ("#...") have no constant.
+    assert!(idle.items.iter().any(|i| matches!(
+        i,
+        DialogItem::Field { label, constant: None, .. } if label.starts_with('#')
+    )));
+
+    assert!(def.dialogs["idleSettings"].topic_help.is_some());
 }
