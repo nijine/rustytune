@@ -1,12 +1,96 @@
 // Header controls: port picker, mode/baud, connect/disconnect, datalog
-// start/stop, connection status.
+// start/stop + saved-log browser, connection status.
 
-import { useCallback, useEffect, useState } from "react";
-import { api, type PortInfo, type Status } from "../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type LogListJson, type PortInfo, type Status } from "../api";
 import type { TelemetryFeed } from "../feed";
 
 const CUSTOM = "__custom__";
 const BAUDS = [115200, 230400, 57600, 38400, 19200, 9600];
+
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/// "Logs ▾" dropdown: what's in the datalog directory, with download links.
+function LogBrowser() {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<LogListJson | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const panel = useRef<HTMLDivElement | null>(null);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      api
+        .logs()
+        .then((l) => {
+          setList(l);
+          setError(null);
+        })
+        .catch((e: Error) => setError(e.message));
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (panel.current && !panel.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  return (
+    <div className="log-browser" ref={panel}>
+      <button className="ghost" onClick={toggle}>
+        Logs ▾
+      </button>
+      {open && (
+        <div className="log-panel">
+          {error && <p className="error">{error}</p>}
+          {list && (
+            <>
+              <p className="log-dir" title={list.dir}>
+                stored in {list.dir}
+              </p>
+              {list.files.length === 0 ? (
+                <p className="muted">
+                  No logs yet — hit ● Log while connected.
+                </p>
+              ) : (
+                <ul>
+                  {list.files.map((f) => (
+                    <li key={f.name}>
+                      <a
+                        href={`/api/logs/${encodeURIComponent(f.name)}`}
+                        download
+                      >
+                        {f.name}
+                      </a>
+                      <span className="log-meta">
+                        {f.active ? (
+                          <span className="log-recording">● recording</span>
+                        ) : (
+                          `${fmtSize(f.size)} · ${f.modified}`
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ConnectBar({
   status,
@@ -146,6 +230,8 @@ export default function ConnectBar({
           </button>
         </div>
       )}
+
+      <LogBrowser />
 
       {(error || status?.lastError) && (
         <span className="error" role="alert">

@@ -323,6 +323,95 @@ pub async fn log_start(State(state): State<SharedState>) -> Response {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LogFile {
+    name: String,
+    size: u64,
+    /// Local mtime, "YYYY-MM-DD HH:MM:SS".
+    modified: String,
+    /// Currently being written by the running log session.
+    active: bool,
+}
+
+/// The datalog directory listing: where the .msl files live and what's
+/// there, newest first.
+pub async fn logs(State(state): State<SharedState>) -> Response {
+    let active = state
+        .status
+        .lock()
+        .unwrap()
+        .log
+        .as_ref()
+        .map(|l| l.path.clone());
+    let dir = state.log_dir.clone();
+    let listing = tokio::task::spawn_blocking(move || {
+        let mut files: Vec<LogFile> = std::fs::read_dir(&dir)
+            .map(|rd| {
+                rd.flatten()
+                    .filter_map(|e| {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        if !name.ends_with(".msl") {
+                            return None;
+                        }
+                        let meta = e.metadata().ok()?;
+                        let modified = meta
+                            .modified()
+                            .ok()
+                            .map(|t| {
+                                chrono::DateTime::<chrono::Local>::from(t)
+                                    .format("%Y-%m-%d %H:%M:%S")
+                                    .to_string()
+                            })
+                            .unwrap_or_default();
+                        let active = active.as_deref().is_some_and(|p| {
+                            std::path::Path::new(p).file_name() == Some(e.file_name().as_ref())
+                        });
+                        Some(LogFile {
+                            name,
+                            size: meta.len(),
+                            modified,
+                            active,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.sort_by(|a, b| b.modified.cmp(&a.modified).then(a.name.cmp(&b.name)));
+        let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+        serde_json::json!({ "dir": dir.to_string_lossy(), "files": files })
+    })
+    .await;
+    match listing {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+pub async fn log_download(State(state): State<SharedState>, Path(name): Path<String>) -> Response {
+    // Names come from our own listing; anything path-like is rejected.
+    if name.contains('/') || name.contains('\\') || name.contains("..") || !name.ends_with(".msl") {
+        return err(StatusCode::BAD_REQUEST, "invalid log name").into_response();
+    }
+    let path = state.log_dir.join(&name);
+    let read = tokio::task::spawn_blocking(move || std::fs::read(path)).await;
+    match read {
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Ok(Ok(bytes)) => (
+            [
+                (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+                (
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{name}\""),
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Ok(Err(e)) => err(StatusCode::NOT_FOUND, format!("{name}: {e}")).into_response(),
+    }
+}
+
 pub async fn log_stop(State(state): State<SharedState>) -> Response {
     let result = tokio::task::spawn_blocking(move || {
         comms_roundtrip(&state, |reply| Cmd::StopLog { reply })

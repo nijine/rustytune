@@ -106,6 +106,18 @@ export interface ConstantJson {
   requiresPowerCycle: boolean;
 }
 
+export interface LogFileJson {
+  name: string;
+  size: number;
+  modified: string;
+  active: boolean;
+}
+
+export interface LogListJson {
+  dir: string;
+  files: LogFileJson[];
+}
+
 export interface MenuEntryJson {
   type: "dialog" | "table" | "curve";
   name: string;
@@ -223,6 +235,7 @@ export const api = {
   disconnect: () => post("/api/disconnect"),
   logStart: () => post("/api/log/start"),
   logStop: () => post("/api/log/stop"),
+  logs: () => request<LogListJson>("/api/logs"),
   tune: () => request<TuneSummary>("/api/tune"),
   table: (id: string) => request<TableJson>(`/api/tune/table/${id}`),
   setCells: (id: string, cells: { row: number; col: number; value: number }[]) =>

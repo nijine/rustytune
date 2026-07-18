@@ -560,6 +560,58 @@ async fn browser_workflow() {
     assert_eq!(first_row.len(), labels.len());
     assert_eq!(first_row[2], "3450"); // RPM, "%d"
 
+    // Log browser: the finished log is listed and downloadable.
+    let listing: serde_json::Value = http
+        .get(format!("{base}/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let log_name = log_path.file_name().unwrap().to_string_lossy().into_owned();
+    let entry = listing["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["name"] == log_name.as_str())
+        .expect("recorded log is listed");
+    assert_eq!(entry["active"], false);
+    assert!(entry["size"].as_u64().unwrap() > 0);
+    assert!(
+        listing["dir"]
+            .as_str()
+            .unwrap()
+            .ends_with(log_dir.file_name().unwrap().to_str().unwrap()),
+        "listing reports the log directory: {}",
+        listing["dir"]
+    );
+
+    let downloaded = http
+        .get(format!("{base}/logs/{log_name}"))
+        .send()
+        .await
+        .unwrap();
+    assert!(downloaded.status().is_success());
+    assert!(
+        downloaded
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains(&log_name)
+    );
+    assert_eq!(downloaded.text().await.unwrap(), msl);
+
+    // Path-shaped names are rejected.
+    let resp = http
+        .get(format!("{base}/logs/..%2Fsecret.msl"))
+        .send()
+        .await
+        .unwrap();
+    assert_ne!(resp.status(), 200, "traversal must not be served");
+
     // Disconnect tears the comms thread down.
     let resp = http
         .post(format!("{base}/disconnect"))

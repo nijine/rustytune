@@ -718,3 +718,75 @@ button.burn-needed {
 .dlg-help a {
   color: var(--accent);
 }
+
+/* Saved-log browser dropdown */
+.log-browser {
+  position: relative;
+}
+
+.log-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 340px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.log-dir {
+  margin: 0 0 8px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.log-panel li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-top: 1px solid var(--grid);
+  font-size: 0.78rem;
+}
+
+.log-panel li:first-child {
+  border-top: none;
+}
+
+.log-panel a {
+  color: var(--accent);
+  text-decoration: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.log-panel a:hover {
+  text-decoration: underline;
+}
+
+.log-meta {
+  color: var(--muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-recording {
+  color: var(--critical, #d03b3b);
+}
