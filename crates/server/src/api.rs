@@ -420,6 +420,33 @@ pub async fn log_download(State(state): State<SharedState>, Path(name): Path<Str
     }
 }
 
+/// Parsed .msl contents for the log viewer: column-major arrays (null =
+/// empty/non-numeric cell), ready for strip charts.
+pub async fn log_data(State(state): State<SharedState>, Path(name): Path<String>) -> Response {
+    if name.contains('/') || name.contains('\\') || name.contains("..") || !name.ends_with(".msl") {
+        return err(StatusCode::BAD_REQUEST, "invalid log name").into_response();
+    }
+    let path = state.log_dir.join(&name);
+    let parsed = tokio::task::spawn_blocking(move || {
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{e}"))?;
+        datalog::read_msl(&text)
+    })
+    .await;
+    match parsed {
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Ok(Err(msg)) => err(StatusCode::NOT_FOUND, format!("{name}: {msg}")).into_response(),
+        Ok(Ok(data)) => Json(serde_json::json!({
+            "name": name,
+            "title": data.title,
+            "labels": data.labels,
+            "units": data.units,
+            "rows": data.rows,
+            "columns": data.columns,
+        }))
+        .into_response(),
+    }
+}
+
 pub async fn log_stop(State(state): State<SharedState>) -> Response {
     let result = tokio::task::spawn_blocking(move || {
         comms_roundtrip(&state, |reply| Cmd::StopLog { reply })

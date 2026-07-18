@@ -107,7 +107,14 @@ export default function TuneView({
 }) {
   const [summary, setSummary] = useState<TuneSummary | null>(null);
   const [tuneState, setTuneState] = useState<TuneState | null>(null);
-  const [tableId, setTableId] = useState<string | null>(null);
+  // Last-viewed table survives reloads.
+  const [tableId, setTableIdState] = useState<string | null>(() =>
+    localStorage.getItem("rustytune-table"),
+  );
+  const setTableId = (id: string | null) => {
+    setTableIdState(id);
+    if (id) localStorage.setItem("rustytune-table", id);
+  };
   const [error, setError] = useState<string | null>(null);
   const [burning, setBurning] = useState(false);
 
@@ -117,7 +124,11 @@ export default function TuneView({
       .then((s) => {
         setSummary(s);
         setTuneState(s);
-        if (!tableId && s.tables.length > 0) {
+        // A saved pick only counts if this definition still has the table.
+        if (
+          (!tableId || !s.tables.some((t) => t.id === tableId)) &&
+          s.tables.length > 0
+        ) {
           const preferred = PREFERRED_TABLES.find((id) =>
             s.tables.some((t) => t.id === id),
           );

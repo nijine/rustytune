@@ -4,18 +4,34 @@ import { TelemetryFeed } from "./feed";
 import ConnectBar from "./components/ConnectBar";
 import Gauge from "./components/Gauge";
 import Indicators from "./components/Indicators";
+import LogViewer from "./components/LogViewer";
 import SettingsView from "./components/SettingsView";
 import TuneFileView from "./components/TuneFileView";
 import TuneView from "./components/TuneView";
+
+type Tab = "dash" | "tune" | "settings" | "file" | "logs";
+const TABS: [Tab, string][] = [
+  ["dash", "Dashboard"],
+  ["tune", "Tuning"],
+  ["settings", "Settings"],
+  ["file", "Tune File"],
+  ["logs", "Log Viewer"],
+];
 
 export default function App() {
   const feed = useMemo(() => new TelemetryFeed(), []);
   const [definition, setDefinition] = useState<Definition | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"dash" | "tune" | "settings" | "file">(
-    "dash",
-  );
+  // The active tab survives reloads (layout persistence).
+  const [tab, setTabState] = useState<Tab>(() => {
+    const saved = localStorage.getItem("rustytune-tab");
+    return TABS.some(([t]) => t === saved) ? (saved as Tab) : "dash";
+  });
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    localStorage.setItem("rustytune-tab", t);
+  };
 
   useEffect(() => {
     api
@@ -45,30 +61,15 @@ export default function App() {
       {definition && (
         <main>
           <nav className="tabs">
-            <button
-              className={tab === "dash" ? "tab active" : "tab"}
-              onClick={() => setTab("dash")}
-            >
-              Dashboard
-            </button>
-            <button
-              className={tab === "tune" ? "tab active" : "tab"}
-              onClick={() => setTab("tune")}
-            >
-              Tuning
-            </button>
-            <button
-              className={tab === "settings" ? "tab active" : "tab"}
-              onClick={() => setTab("settings")}
-            >
-              Settings
-            </button>
-            <button
-              className={tab === "file" ? "tab active" : "tab"}
-              onClick={() => setTab("file")}
-            >
-              Tune File
-            </button>
+            {TABS.map(([id, label]) => (
+              <button
+                key={id}
+                className={tab === id ? "tab active" : "tab"}
+                onClick={() => setTab(id)}
+              >
+                {label}
+              </button>
+            ))}
           </nav>
           {tab === "dash" && (
             <>
@@ -97,6 +98,7 @@ export default function App() {
               offline={status?.offline ?? false}
             />
           )}
+          {tab === "logs" && <LogViewer />}
           <footer>
             <span>{definition.signature}</span>
             {status && status.connected && (

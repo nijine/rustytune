@@ -1,7 +1,7 @@
 # rust-embed bakes web/dist into the server binary, so the web build must
 # run before any cargo build that should serve a real page.
 
-.PHONY: all web build run bench dev test fmt clean
+.PHONY: all web build run bench dev test fmt clean release
 
 all: build
 
@@ -22,6 +22,13 @@ bench:
 # Run `cargo run -p rustytune-server -- --no-open` in another terminal.
 dev:
 	cd web && npm run dev
+
+# Local single-binary release tarball for this machine's OS/arch.
+release: build
+	mkdir -p dist
+	tar czf dist/rustytune-$$(uname -s | tr 'A-Z' 'a-z')-$$(uname -m).tar.gz \
+		-C target/release rustytune
+	@echo "dist/rustytune-$$(uname -s | tr 'A-Z' 'a-z')-$$(uname -m).tar.gz"
 
 test:
 	cargo fmt --all --check

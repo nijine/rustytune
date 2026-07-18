@@ -612,6 +612,31 @@ async fn browser_workflow() {
         .unwrap();
     assert_ne!(resp.status(), 200, "traversal must not be served");
 
+    // Log viewer data: the recorded .msl parses into column-major arrays.
+    let log_data: serde_json::Value = http
+        .get(format!("{base}/logs/{log_name}/data"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let data_labels = log_data["labels"].as_array().unwrap();
+    assert_eq!(data_labels[0], "Time");
+    assert_eq!(data_labels[2], "RPM");
+    let n_rows = log_data["rows"].as_u64().unwrap();
+    assert!(n_rows > 0);
+    let cols = log_data["columns"].as_array().unwrap();
+    assert_eq!(cols.len(), data_labels.len());
+    assert_eq!(cols[2].as_array().unwrap().len() as u64, n_rows);
+    assert_eq!(cols[2][0], 3450.0, "static fake-ECU RPM");
+    let resp = http
+        .get(format!("{base}/logs/..%2Fsecret.msl/data"))
+        .send()
+        .await
+        .unwrap();
+    assert_ne!(resp.status(), 200, "traversal must not be served");
+
     // Disconnect tears the comms thread down.
     let resp = http
         .post(format!("{base}/disconnect"))

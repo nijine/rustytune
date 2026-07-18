@@ -1,0 +1,56 @@
+# Tag v* to cut a release: single-binary builds (web UI embedded) for
+# macOS arm64 and Linux x86_64/arm64 (the Pi target). Windows needs a
+# serial transport port (the Unix one is open(2)+termios) — not yet built.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-latest
+            name: macos-arm64
+          - runner: ubuntu-latest
+            name: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            name: linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release -p rustytune-server
+
+      - name: Package
+        run: |
+          tar czf rustytune-${{ github.ref_name }}-${{ matrix.name }}.tar.gz \
+            -C target/release rustytune
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: rustytune-*.tar.gz
+          draft: true

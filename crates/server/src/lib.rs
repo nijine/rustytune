@@ -73,6 +73,7 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/log/stop", post(api::log_stop))
         .route("/api/logs", get(api::logs))
         .route("/api/logs/{name}", get(api::log_download))
+        .route("/api/logs/{name}/data", get(api::log_data))
         .route("/api/tune", get(api::tune_summary))
         .route("/api/tune/table/{id}", get(api::tune_table))
         .route("/api/tune/table/{id}/cells", post(api::tune_table_cells))

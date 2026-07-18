@@ -173,6 +173,59 @@ impl MslWriter {
     }
 }
 
+/// A parsed .msl file, column-major. `None` cells were empty or
+/// non-numeric.
+pub struct MslData {
+    pub title: String,
+    pub labels: Vec<String>,
+    pub units: Vec<String>,
+    pub rows: usize,
+    pub columns: Vec<Vec<Option<f64>>>,
+}
+
+/// Parse MSL text (three header lines, then tab-separated rows). Also
+/// accepts files written by TunerStudio/MegaLogViewer — short rows pad
+/// with `None`, "MARK" annotation lines are skipped.
+pub fn read_msl(text: &str) -> Result<MslData, String> {
+    let mut lines = text.split(['\n']).map(|l| l.trim_end_matches('\r'));
+    let title = lines.next().ok_or("empty file")?.to_string();
+    let labels: Vec<String> = lines
+        .next()
+        .ok_or("missing label line")?
+        .split('\t')
+        .map(str::to_string)
+        .collect();
+    if labels.len() < 2 {
+        return Err("not an MSL file (no tab-separated labels)".into());
+    }
+    let units: Vec<String> = lines
+        .next()
+        .ok_or("missing units line")?
+        .split('\t')
+        .map(str::to_string)
+        .collect();
+
+    let mut columns: Vec<Vec<Option<f64>>> = vec![Vec::new(); labels.len()];
+    let mut rows = 0usize;
+    for line in lines {
+        if line.is_empty() || line.starts_with("MARK") {
+            continue;
+        }
+        let mut cells = line.split('\t');
+        for col in &mut columns {
+            col.push(cells.next().and_then(|c| c.trim().parse::<f64>().ok()));
+        }
+        rows += 1;
+    }
+    Ok(MslData {
+        title,
+        labels,
+        units,
+        rows,
+        columns,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +286,26 @@ mod tests {
              0.066\t3455\t\r\n"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+
+        // The reader round-trips what the writer produced.
+        let data = read_msl(&text).unwrap();
+        assert_eq!(data.title, "\"rustytune test log\"");
+        assert_eq!(data.labels, ["Time", "RPM", "AFR"]);
+        assert_eq!(data.units, ["sec", "RPM", ""]);
+        assert_eq!(data.rows, 2);
+        assert_eq!(data.columns[0], [Some(0.016), Some(0.066)]);
+        assert_eq!(data.columns[1], [Some(3450.0), Some(3455.0)]);
+        assert_eq!(data.columns[2], [Some(14.7), None]);
+    }
+
+    #[test]
+    fn read_msl_tolerates_marks_and_short_rows() {
+        let text = "\"t\"\r\nTime\tRPM\r\nsec\tRPM\r\n\
+                    0.1\t900\r\nMARK 001 something\r\n0.2\r\n";
+        let data = read_msl(text).unwrap();
+        assert_eq!(data.rows, 2);
+        assert_eq!(data.columns[1], [Some(900.0), None]);
+
+        assert!(read_msl("just some text\nno tabs\n").is_err());
     }
 }

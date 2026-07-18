@@ -141,6 +141,16 @@ export interface LogListJson {
   files: LogFileJson[];
 }
 
+export interface LogDataJson {
+  name: string;
+  title: string;
+  labels: string[];
+  units: string[];
+  rows: number;
+  /// Column-major; null = empty/non-numeric cell.
+  columns: (number | null)[][];
+}
+
 export interface MenuEntryJson {
   type: "dialog" | "table" | "curve";
   name: string;
@@ -259,6 +269,8 @@ export const api = {
   logStart: () => post("/api/log/start"),
   logStop: () => post("/api/log/stop"),
   logs: () => request<LogListJson>("/api/logs"),
+  logData: (name: string) =>
+    request<LogDataJson>(`/api/logs/${encodeURIComponent(name)}/data`),
   tune: () => request<TuneSummary>("/api/tune"),
   table: (id: string) => request<TableJson>(`/api/tune/table/${id}`),
   setCells: (id: string, cells: { row: number; col: number; value: number }[]) =>
