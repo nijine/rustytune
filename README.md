@@ -10,8 +10,10 @@ headless on an in-car Raspberry Pi and tune from any device on its network.
 
 **Status: it tunes.** Connect over USB (primary) or SER3 (secondary),
 watch the INI-defined gauges live, record MegaLogViewer `.msl` datalogs,
-edit VE/ignition/AFR tables and key constants in the browser (live `M`
-writes, CRC-verified), and burn to EEPROM. `.msq` interop is next.
+edit VE/ignition/AFR tables in the browser (live `M` writes,
+CRC-verified), edit every settings dialog the INI defines (acceleration
+enrichment, idle, fan, launch, boost, ...), burn to EEPROM, and diff the
+ECU against a TunerStudio `.msq` — with selective apply and save.
 
 ## Architecture
 
@@ -34,7 +36,32 @@ Requires Rust (stable) and Node ≥ 22.
 make run        # build frontend, then cargo run (opens the browser)
 make test       # fmt check + clippy + tests
 make dev        # Vite dev server with HMR (run the server separately)
+make bench      # hardware-free test bench (see below)
 ```
+
+## Test bench — no car required
+
+`make bench` (or `tools/bench.sh`) starts a simulated Speeduino on a pty
+and the server against it. The port shows up in the picker as
+`/tmp/rustytune-sim`; hit Connect and everything works exactly like real
+hardware: full page download with CRC verification, animated telemetry
+on the gauges, table and settings edits flushed as `M` writes, burns.
+
+The bench "EEPROM" lives in `tools/fake-ecu/bench-tune.json` (gitignored)
+— burned changes survive restarting the bench, just like a real ECU
+power cycle. Delete the file for a factory-fresh ECU.
+
+Flags pass through to the simulator:
+
+```sh
+tools/bench.sh --static             # fixed reference values (RPM 3450, AFR 14.7)
+tools/bench.sh --corrupt-every 50   # inject CRC errors to watch recovery
+```
+
+Because the simulator speaks the same Protocol 3 the firmware does (page
+reads/writes, `d` CRC checks, burn semantics, error codes), anything
+that works on the bench is exercising the identical code path used at
+the car — only the transport endpoint differs.
 
 ## ECU definitions
 

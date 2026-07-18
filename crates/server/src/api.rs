@@ -108,6 +108,18 @@ pub async fn ports() -> Json<Vec<PortInfo>> {
         })
         .unwrap_or_default();
     out.sort_by(|a, b| b.usb.cmp(&a.usb).then(a.path.cmp(&b.path)));
+    // Hardware-free bench (tools/bench.sh): fake-ECU pty symlinks.
+    if let Ok(rd) = std::fs::read_dir("/tmp") {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("rustytune-sim") {
+                out.push(PortInfo {
+                    path: format!("/tmp/{name}"),
+                    usb: false,
+                });
+            }
+        }
+    }
     Json(out)
 }
 
