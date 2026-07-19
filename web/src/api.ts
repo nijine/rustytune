@@ -271,6 +271,15 @@ export const api = {
   logs: () => request<LogListJson>("/api/logs"),
   logData: (name: string) =>
     request<LogDataJson>(`/api/logs/${encodeURIComponent(name)}/data`),
+  logImport: (name: string, content: string) =>
+    request<{ name: string; rows: number }>(
+      `/api/logs/${encodeURIComponent(name)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: content,
+      },
+    ),
   tune: () => request<TuneSummary>("/api/tune"),
   table: (id: string) => request<TableJson>(`/api/tune/table/${id}`),
   setCells: (id: string, cells: { row: number; col: number; value: number }[]) =>

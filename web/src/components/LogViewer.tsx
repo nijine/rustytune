@@ -120,8 +120,10 @@ export default function LogViewer() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [width, setWidth] = useState(0);
+  const [importing, setImporting] = useState(false);
   const chartsArea = useRef<HTMLDivElement | null>(null);
   const charts = useRef<Map<string, uPlot>>(new Map());
+  const filePicker = useRef<HTMLInputElement | null>(null);
 
   const refreshFiles = useCallback(() => {
     api
@@ -155,6 +157,22 @@ export default function LogViewer() {
   useEffect(() => {
     if (selected) open(selected);
   }, [selected, open]);
+
+  // Copy an existing .msl (e.g. a TunerStudio log) into the server's log
+  // dir, then open it.
+  const importFile = (file: File) => {
+    setImporting(true);
+    setError(null);
+    file
+      .text()
+      .then((text) => api.logImport(file.name, text))
+      .then((r) => {
+        refreshFiles();
+        setSelected(r.name);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setImporting(false));
+  };
 
   // Charts fill the available width; re-measure on window resize.
   useEffect(() => {
@@ -216,6 +234,25 @@ export default function LogViewer() {
         <button className="ghost" onClick={refreshFiles} title="Rescan logs">
           ⟳
         </button>
+        <button
+          className="ghost"
+          disabled={importing}
+          onClick={() => filePicker.current?.click()}
+          title="Copy an existing .msl into the log folder"
+        >
+          {importing ? "Importing…" : "Import…"}
+        </button>
+        <input
+          ref={filePicker}
+          type="file"
+          accept=".msl"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) importFile(f);
+            e.target.value = "";
+          }}
+        />
         {selected && (
           <button
             className="ghost"
@@ -236,7 +273,8 @@ export default function LogViewer() {
 
       {files.length === 0 && !error && (
         <p className="muted center-note">
-          No datalogs yet — hit ● Log while connected, then come back here.
+          No datalogs yet — hit ● Log while connected, or Import… an
+          existing .msl.
         </p>
       )}
 

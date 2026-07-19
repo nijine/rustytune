@@ -72,7 +72,14 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/log/start", post(api::log_start))
         .route("/api/log/stop", post(api::log_stop))
         .route("/api/logs", get(api::logs))
-        .route("/api/logs/{name}", get(api::log_download))
+        // Imports can be big (long TunerStudio sessions), hence the raised
+        // body limit on this route.
+        .route(
+            "/api/logs/{name}",
+            get(api::log_download)
+                .post(api::log_import)
+                .layer(axum::extract::DefaultBodyLimit::max(256 * 1024 * 1024)),
+        )
         .route("/api/logs/{name}/data", get(api::log_data))
         .route("/api/tune", get(api::tune_summary))
         .route("/api/tune/table/{id}", get(api::tune_table))

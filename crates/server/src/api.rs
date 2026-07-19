@@ -420,6 +420,48 @@ pub async fn log_download(State(state): State<SharedState>, Path(name): Path<Str
     }
 }
 
+/// Import an existing .msl (e.g. recorded by TunerStudio) into the log dir
+/// so the viewer can open it. Body is the raw file text; it must parse as
+/// MSL before anything is written. A name collision gets a numeric suffix —
+/// the stored name comes back in the response.
+pub async fn log_import(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    if name.contains('/') || name.contains('\\') || name.contains("..") || !name.ends_with(".msl") {
+        return err(StatusCode::BAD_REQUEST, "invalid log name (want *.msl)").into_response();
+    }
+    let dir = state.log_dir.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        // TS logs can be ISO-8859-1 (° in the units line); store the lossy
+        // UTF-8 decode, since that's what read_msl serves back later.
+        let text = String::from_utf8_lossy(&body);
+        let data = datalog::read_msl(&text)
+            .map_err(|e| err(StatusCode::BAD_REQUEST, format!("not a valid .msl: {e}")))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let stem = name.strip_suffix(".msl").unwrap_or(&name);
+        let mut stored = name.clone();
+        let mut n = 1;
+        while dir.join(&stored).exists() {
+            n += 1;
+            stored = format!("{stem}-{n}.msl");
+        }
+        std::fs::write(dir.join(&stored), text.as_bytes())
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok::<_, ApiError>((stored, data.rows))
+    })
+    .await;
+    match result {
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Ok(Err(e)) => e.into_response(),
+        Ok(Ok((stored, rows))) => {
+            Json(serde_json::json!({ "name": stored, "rows": rows })).into_response()
+        }
+    }
+}
+
 /// Parsed .msl contents for the log viewer: column-major arrays (null =
 /// empty/non-numeric cell), ready for strip charts.
 pub async fn log_data(State(state): State<SharedState>, Path(name): Path<String>) -> Response {

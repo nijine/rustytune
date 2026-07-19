@@ -637,6 +637,60 @@ async fn browser_workflow() {
         .unwrap();
     assert_ne!(resp.status(), 200, "traversal must not be served");
 
+    // Importing an external .msl (e.g. a TunerStudio log) stores it in the
+    // log dir; a second import of the same name gets a numeric suffix.
+    let external = "\"external\"\n\
+        Time\tRPM\tAFR\n\
+        s\tRPM\tAFR\n\
+        0.0\t900\t14.7\n\
+        0.1\t950\t14.5\n";
+    let imported: serde_json::Value = http
+        .post(format!("{base}/logs/imported_test.msl"))
+        .body(external)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(imported["name"], "imported_test.msl");
+    assert_eq!(imported["rows"], 2);
+    let again: serde_json::Value = http
+        .post(format!("{base}/logs/imported_test.msl"))
+        .body(external)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(again["name"], "imported_test-2.msl", "collision gets suffix");
+    let imported_data: serde_json::Value = http
+        .get(format!("{base}/logs/imported_test.msl/data"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(imported_data["labels"][1], "RPM");
+    assert_eq!(imported_data["columns"][1][1], 950.0);
+    // Junk content and path-shaped names are rejected before writing.
+    let resp = http
+        .post(format!("{base}/logs/junk.msl"))
+        .body("not an msl at all")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400, "junk import must be rejected");
+    let resp = http
+        .post(format!("{base}/logs/..%2Fevil.msl"))
+        .body(external)
+        .send()
+        .await
+        .unwrap();
+    assert_ne!(resp.status(), 200, "traversal import must be rejected");
+
     // Disconnect tears the comms thread down.
     let resp = http
         .post(format!("{base}/disconnect"))
