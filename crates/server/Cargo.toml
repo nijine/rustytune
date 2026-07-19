@@ -22,6 +22,7 @@ datalog = { path = "../datalog" }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
 clap = { version = "4", features = ["derive"] }
+libc = "0.2"
 chrono = "0.4"
 crc32fast = "1"
 rust-embed = "8"
