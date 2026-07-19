@@ -3,6 +3,7 @@ import { api, type Definition, type Status } from "./api";
 import { TelemetryFeed } from "./feed";
 import ConnectBar from "./components/ConnectBar";
 import Gauge from "./components/Gauge";
+import GaugeTile from "./components/GaugeTile";
 import Indicators from "./components/Indicators";
 import LogViewer from "./components/LogViewer";
 import SettingsView from "./components/SettingsView";
@@ -10,6 +11,51 @@ import TuneFileView from "./components/TuneFileView";
 import TuneView from "./components/TuneView";
 
 type Tab = "dash" | "tune" | "settings" | "file" | "logs";
+
+/// Dashboard look preferences, persisted per browser.
+interface DashPrefs {
+  gauges: "dials" | "tiles";
+  indicators: "all" | "active";
+}
+
+const DASH_PREFS_KEY = "rustytune-dash-prefs";
+
+function loadDashPrefs(): DashPrefs {
+  try {
+    const raw = localStorage.getItem(DASH_PREFS_KEY);
+    const p = raw ? (JSON.parse(raw) as Partial<DashPrefs>) : {};
+    return {
+      gauges: p.gauges === "tiles" ? "tiles" : "dials",
+      indicators: p.indicators === "active" ? "active" : "all",
+    };
+  } catch {
+    return { gauges: "dials", indicators: "all" };
+  }
+}
+
+function Seg<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: [T, string][];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <span className="seg">
+      {options.map(([v, label]) => (
+        <button
+          key={v}
+          className={value === v ? "on" : ""}
+          onClick={() => onChange(v)}
+        >
+          {label}
+        </button>
+      ))}
+    </span>
+  );
+}
 const TABS: [Tab, string][] = [
   ["dash", "Dashboard"],
   ["tune", "Tuning"],
@@ -31,6 +77,14 @@ export default function App() {
   const setTab = (t: Tab) => {
     setTabState(t);
     localStorage.setItem("rustytune-tab", t);
+  };
+  const [dashPrefs, setDashPrefs] = useState<DashPrefs>(loadDashPrefs);
+  const updateDashPrefs = (patch: Partial<DashPrefs>) => {
+    setDashPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      localStorage.setItem(DASH_PREFS_KEY, JSON.stringify(next));
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -73,12 +127,48 @@ export default function App() {
           </nav>
           {tab === "dash" && (
             <>
-              <Indicators defs={definition.indicators} feed={feed} />
-              <div className="gauges">
-                {definition.gauges.map((g) => (
-                  <Gauge key={g.name} def={g} feed={feed} />
-                ))}
+              <div className="dash-options">
+                <label>
+                  Gauges
+                  <Seg
+                    value={dashPrefs.gauges}
+                    options={[
+                      ["dials", "Dials"],
+                      ["tiles", "Tiles"],
+                    ]}
+                    onChange={(gauges) => updateDashPrefs({ gauges })}
+                  />
+                </label>
+                <label>
+                  Status
+                  <Seg
+                    value={dashPrefs.indicators}
+                    options={[
+                      ["all", "All"],
+                      ["active", "Active only"],
+                    ]}
+                    onChange={(indicators) => updateDashPrefs({ indicators })}
+                  />
+                </label>
               </div>
+              <Indicators
+                defs={definition.indicators}
+                feed={feed}
+                mode={dashPrefs.indicators}
+              />
+              {dashPrefs.gauges === "dials" ? (
+                <div className="gauges">
+                  {definition.gauges.map((g) => (
+                    <Gauge key={g.name} def={g} feed={feed} />
+                  ))}
+                </div>
+              ) : (
+                <div className="gauge-tiles">
+                  {definition.gauges.map((g) => (
+                    <GaugeTile key={g.name} def={g} feed={feed} />
+                  ))}
+                </div>
+              )}
             </>
           )}
           {tab === "tune" && (

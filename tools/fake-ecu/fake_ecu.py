@@ -47,6 +47,7 @@ import tty
 import zlib
 
 OCH_OFFSETS = {  # keep in sync with fixtures/speeduino202405_dev.ini
+    "engine": 2,  # bitfield: 0 running, 1 crank, 3 warmup
     "map": 4,  # U16
     "iat": 6,
     "clt": 7,
@@ -176,6 +177,12 @@ def build_payload(och_size, t, static):
     payload[OCH_OFFSETS["afr"]] = afr_raw
     payload[OCH_OFFSETS["bat"]] = bat_raw
     payload[OCH_OFFSETS["spark"]] = adv
+    # Engine status bits so indicator lamps light: running above cranking
+    # speed, warmup until coolant reaches operating temperature.
+    engine = 0x01 if rpm > 400 else 0x02
+    if clt_raw - 40 < 90:
+        engine |= 0x08
+    payload[OCH_OFFSETS["engine"]] = engine
     return payload
 
 

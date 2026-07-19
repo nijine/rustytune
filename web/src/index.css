@@ -164,6 +164,122 @@ button.ghost {
   padding-top: 8px;
 }
 
+/* Dashboard look options */
+.dash-options {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  padding-top: 10px;
+}
+
+.dash-options > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg button {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--secondary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.seg button + button {
+  border-left: 1px solid var(--border);
+}
+
+.seg button.on {
+  background: var(--accent);
+  color: #0d0d0d;
+  font-weight: 600;
+}
+
+/* "Active only" status section: lamps appear here while their condition
+   holds; fixed min-height so the gauges don't jump when one lights. */
+.indicators-active {
+  min-height: 46px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 10px;
+}
+
+.indicators-active .no-active {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Simple tile gauges (the pi-speeduino-dash look) */
+.gauge-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.gauge-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tile-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile-value {
+  font-size: 2.2rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.gauge-tile.warn .tile-value {
+  color: var(--warning);
+}
+
+.gauge-tile.danger .tile-value {
+  color: var(--critical);
+}
+
+.tile-unit {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
 .gauge {
   margin: 0;
   text-align: center;
