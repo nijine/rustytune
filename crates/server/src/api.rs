@@ -41,13 +41,15 @@ pub struct AppState {
     /// Symbols the INI was parsed with (recorded in saved .msq settings).
     pub symbols: Vec<String>,
     pub log_dir: PathBuf,
+    pub runtime: Arc<crate::config::RuntimeConfig>,
+    pub auth: Arc<crate::auth::AuthState>,
 }
 
 pub type SharedState = Arc<AppState>;
 
 /// JSON error body with an HTTP status. Kept small (clippy result_large_err);
 /// becomes a full `Response` only at the handler edge.
-struct ApiError(StatusCode, String);
+pub(crate) struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -180,7 +182,7 @@ pub async fn connect(State(state): State<SharedState>, Json(req): Json<ConnectRe
     }
 }
 
-fn do_connect(state: &SharedState, req: ConnectReq) -> Result<Status, ApiError> {
+pub(crate) fn do_connect(state: &SharedState, req: ConnectReq) -> Result<Status, ApiError> {
     let mode = match req.mode.as_str() {
         "primary" => Mode::Primary,
         "secondary" => Mode::Secondary,
@@ -256,6 +258,15 @@ fn do_connect(state: &SharedState, req: ConnectReq) -> Result<Status, ApiError> 
         poll_interval: Duration::from_millis(req.poll_ms.clamp(20, 1000)),
         tune: state.tune.clone(),
         pages,
+        auto_log: state.runtime.logging.auto,
+        log_dir: state.log_dir.clone(),
+        retention_bytes: state.runtime.logging.retention_bytes,
+        engine_shutdown: state.runtime.engine_shutdown.clone(),
+        shutdown_request_path: state
+            .runtime
+            .engine_shutdown
+            .enabled
+            .then(|| PathBuf::from("/run/rustytune/poweroff-request")),
     };
     let delay = state
         .def
@@ -268,6 +279,52 @@ fn do_connect(state: &SharedState, req: ConnectReq) -> Result<Status, ApiError> 
     let status = state.status.lock().unwrap().clone();
     let _ = state.events.send(comms::status_message(&status));
     Ok(status)
+}
+
+pub async fn appliance_config(
+    State(state): State<SharedState>,
+) -> Json<crate::config::RuntimeConfig> {
+    Json((*state.runtime).clone())
+}
+pub async fn appliance_config_put(
+    State(state): State<SharedState>,
+    Json(cfg): Json<crate::config::RuntimeConfig>,
+) -> Response {
+    let Some(path) = state.runtime.source_path.as_ref() else {
+        return err(
+            StatusCode::CONFLICT,
+            "no configuration file was selected at startup",
+        )
+        .into_response();
+    };
+    if !cfg.server.bind.is_loopback() && !cfg.authentication.required {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "authentication is required for a non-loopback listener",
+        )
+        .into_response();
+    }
+    if let Err(e) = cfg.validate() {
+        return err(StatusCode::BAD_REQUEST, e).into_response();
+    }
+    let text = match toml::to_string_pretty(&cfg) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    };
+    match std::fs::write(path, text) {
+        Ok(()) => Json(serde_json::json!({"saved":true,"restartRequired":true})).into_response(),
+        Err(e) => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("write {}: {e}", path.display()),
+        )
+        .into_response(),
+    }
+}
+pub async fn pairing_open(State(state): State<SharedState>) -> Response {
+    match state.auth.open_pairing() {
+        Ok(info) => Json(info).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
 }
 
 pub async fn disconnect(State(state): State<SharedState>) -> Response {

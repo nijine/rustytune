@@ -1,7 +1,7 @@
 # rust-embed bakes web/dist into the server binary, so the web build must
 # run before any cargo build that should serve a real page.
 
-.PHONY: all web build run bench dev test fmt clean release
+.PHONY: all web build run bench dev test fmt clean release oled oled-check appliance-check
 
 all: build
 
@@ -38,6 +38,18 @@ test:
 fmt:
 	cargo fmt --all
 
+# Native Raspberry Pi OLED configurator. It remains a separate C build and is
+# intentionally not a Cargo workspace member.
+oled:
+	$(MAKE) -C appliance/oled-configurator
+
+oled-check:
+	$(MAKE) -C appliance/oled-configurator check
+
+appliance-check: oled-check
+	cargo test -p rustytune-server
+
 clean:
 	cargo clean
 	rm -rf web/node_modules web/dist/*
+	$(MAKE) -C appliance/oled-configurator clean

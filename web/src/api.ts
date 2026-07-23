@@ -49,6 +49,41 @@ export interface Status {
   log: LogStatus | null;
 }
 
+export interface RuntimeConfig {
+  server: {
+    bind: string;
+    port: number;
+    open_browser: boolean;
+    admin_socket: string | null;
+  };
+  ecu: {
+    device: string;
+    mode: string;
+    baud: number;
+    poll_ms: number;
+    auto_connect: boolean;
+    ini: string | null;
+  };
+  logging: {
+    directory: string;
+    auto: boolean;
+    retention_bytes: number;
+  };
+  engine_shutdown: {
+    enabled: boolean;
+    arm_rpm: number;
+    stop_rpm: number;
+    delay_seconds: number;
+  };
+  authentication: {
+    required: boolean;
+    state_directory: string;
+  };
+  captive_portal: {
+    enabled: boolean;
+  };
+}
+
 export interface Frame {
   t: number;
   channels: Record<string, number | string>;
@@ -230,7 +265,21 @@ export interface MsqDiffJson {
 export function clientId(): string {
   let id = localStorage.getItem("rustytune-client-id");
   if (!id) {
-    id = crypto.randomUUID();
+    // `crypto.randomUUID()` is restricted to secure contexts by some mobile
+    // browsers. Appliance mode is intentionally served over plain HTTP, so use
+    // getRandomValues when randomUUID is unavailable.
+    if (typeof crypto.randomUUID === "function") {
+      id = crypto.randomUUID();
+    } else {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = Array.from(bytes, (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("");
+      id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
     localStorage.setItem("rustytune-client-id", id);
   }
   return id;
@@ -260,8 +309,20 @@ const post = <T = unknown,>(path: string, body?: unknown) =>
   });
 
 export const api = {
+  pair: (code: string) => post<{ paired: boolean }>("/api/pair", { code }),
   definition: () => request<Definition>("/api/definition"),
   status: () => request<Status>("/api/status"),
+  applianceConfig: () =>
+    request<RuntimeConfig>("/api/appliance/config"),
+  applianceConfigPut: (config: RuntimeConfig) =>
+    request<{ saved: boolean; restartRequired: boolean }>(
+      "/api/appliance/config",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      },
+    ),
   ports: () => request<PortInfo[]>("/api/ports"),
   connect: (port: string, mode: string, baud: number) =>
     post("/api/connect", { port, mode, baud }),

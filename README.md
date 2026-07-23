@@ -1,7 +1,15 @@
 # rustytune
 
+RustyTune supports a default standalone desktop profile and an explicit
+Raspberry Pi appliance profile. See [docs/raspberry-pi-appliance.md](docs/raspberry-pi-appliance.md)
+for safe installation, validation, pairing, and rollback.
+
+Pi deployment assets live under [`appliance/`](appliance/), including the
+independently buildable native OLED configurator. Run `make appliance-check`
+to verify the RustyTune server and OLED companion together.
+
 Open-source tuning software for [Speeduino](https://speeduino.com) ECUs — a
-native, no-license alternative to TunerStudio for the day-to-day tuning loop:
+native alternative to TunerStudio for the day-to-day tuning loop:
 realtime gauges, VE/ignition/AFR table editing, burn, and datalogging.
 
 One Rust binary owns the ECU serial port and serves a browser UI on

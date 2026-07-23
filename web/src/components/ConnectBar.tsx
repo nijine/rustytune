@@ -129,6 +129,15 @@ export default function ConnectBar({
   );
 
   const connected = status?.connected ?? false;
+  const ecuResponding =
+    connected &&
+    ((status?.frames ?? 0) > 0 || status?.ecuSignature != null) &&
+    status?.lastError !== "ECU not responding";
+  const connectionState = ecuResponding
+    ? "ECU connected and responding"
+    : connected
+      ? "Serial initialized; waiting for ECU"
+      : "Disconnected";
   const logging = Boolean(status?.log);
 
   const run = (op: () => Promise<unknown>) => {
@@ -146,8 +155,9 @@ export default function ConnectBar({
       <div className="brand">
         <h1>rustytune</h1>
         <span
-          className={`dot ${connected ? "ok" : ""}`}
-          title={connected ? "connected" : "disconnected"}
+          className={`dot ${ecuResponding ? "ok" : connected ? "waiting" : ""}`}
+          title={connectionState}
+          aria-label={connectionState}
         />
         {status?.offline && (
           <span className="offline-pill" title="Editing a .msq with no ECU">

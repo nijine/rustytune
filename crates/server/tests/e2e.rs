@@ -664,7 +664,10 @@ async fn browser_workflow() {
         .json()
         .await
         .unwrap();
-    assert_eq!(again["name"], "imported_test-2.msl", "collision gets suffix");
+    assert_eq!(
+        again["name"], "imported_test-2.msl",
+        "collision gets suffix"
+    );
     let imported_data: serde_json::Value = http
         .get(format!("{base}/logs/imported_test.msl/data"))
         .send()

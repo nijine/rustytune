@@ -11,17 +11,24 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use clap::Parser;
+use rustytune_server::config::{Profile, RuntimeConfig};
 
 #[derive(Parser)]
 #[command(name = "rustytune", version, about = "Speeduino tuning server")]
 struct Args {
+    /// Runtime deployment profile (desktop remains the default)
+    #[arg(long, value_enum, default_value_t=Profile::Desktop)]
+    profile: Profile,
+    /// TOML configuration file (appliance default: /etc/rustytune/rustytune.toml)
+    #[arg(long)]
+    config: Option<PathBuf>,
     /// Port to listen on
-    #[arg(long, default_value_t = 8642)]
-    port: u16,
+    #[arg(long)]
+    port: Option<u16>,
 
     /// Address to bind (keep loopback unless you know what you're doing)
-    #[arg(long, default_value = "127.0.0.1")]
-    bind: IpAddr,
+    #[arg(long)]
+    bind: Option<IpAddr>,
 
     /// Don't open the browser after startup
     #[arg(long)]
@@ -36,8 +43,11 @@ struct Args {
     symbols: Vec<String>,
 
     /// Directory for .msl datalogs
-    #[arg(long, default_value = "logs")]
-    log_dir: PathBuf,
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
+    /// Permit an unauthenticated non-loopback appliance listener (development only)
+    #[arg(long)]
+    allow_unsafe_no_auth: bool,
 }
 
 #[tokio::main]
@@ -49,8 +59,44 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let args = Args::parse();
+    let base = match args.profile {
+        Profile::Desktop => RuntimeConfig::desktop(),
+        Profile::Appliance => RuntimeConfig::appliance(),
+    };
+    let config_path = args.config.clone().or_else(|| {
+        (args.profile == Profile::Appliance).then(|| PathBuf::from("/etc/rustytune/rustytune.toml"))
+    });
+    let mut runtime = match config_path.as_deref() {
+        Some(p) => RuntimeConfig::load(p, base).map_err(std::io::Error::other)?,
+        None => base,
+    };
+    if let Some(v) = args.bind {
+        runtime.server.bind = v;
+    }
+    if let Some(v) = args.port {
+        runtime.server.port = v;
+    }
+    if args.no_open {
+        runtime.server.open_browser = false;
+    }
+    if let Some(v) = &args.log_dir {
+        runtime.logging.directory = v.clone();
+    }
+    if let Some(v) = &args.ini {
+        runtime.ecu.ini = Some(v.clone());
+    }
+    runtime.validate().map_err(std::io::Error::other)?;
+    if args.profile == Profile::Appliance
+        && !runtime.server.bind.is_loopback()
+        && !runtime.authentication.required
+        && !args.allow_unsafe_no_auth
+    {
+        return Err(std::io::Error::other(
+            "refusing unauthenticated non-loopback appliance listener; enable authentication or pass --allow-unsafe-no-auth",
+        ));
+    }
 
-    let ini_src = match &args.ini {
+    let ini_src = match &runtime.ecu.ini {
         Some(path) => std::fs::read_to_string(path)?,
         None => rustytune_server::EMBEDDED_INI.to_string(),
     };
@@ -72,15 +118,27 @@ async fn main() -> std::io::Result<()> {
         def.gauges.len()
     );
 
-    let state = rustytune_server::build_state_with_symbols(def, args.symbols.clone(), args.log_dir);
+    let state = if args.profile == Profile::Appliance {
+        rustytune_server::build_appliance_state(def, args.symbols.clone(), runtime.clone())
+    } else {
+        rustytune_server::build_state_with_symbols(
+            def,
+            args.symbols.clone(),
+            runtime.logging.directory.clone(),
+        )
+    };
     let app = rustytune_server::app(state.clone());
+    rustytune_server::spawn_auto_connect(state.clone());
+    if let Some(path) = runtime.server.admin_socket.clone() {
+        rustytune_server::admin::spawn(state.clone(), path)?;
+    }
 
-    let addr = SocketAddr::new(args.bind, args.port);
+    let addr = SocketAddr::new(runtime.server.bind, runtime.server.port);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let url = format!("http://{}", listener.local_addr()?);
     tracing::info!("listening on {url}");
 
-    if !args.no_open
+    if runtime.server.open_browser
         && let Err(err) = open::that(&url)
     {
         tracing::warn!("could not open browser: {err}");
@@ -102,6 +160,18 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            r = tokio::signal::ctrl_c() => r.expect("failed to install ctrl-c handler"),
+            _ = terminate.recv() => tracing::info!("SIGTERM received, shutting down"),
+            _ = quit_key() => tracing::info!("q pressed, shutting down"),
+        }
+    }
+    #[cfg(not(unix))]
     tokio::select! {
         r = tokio::signal::ctrl_c() => r.expect("failed to install ctrl-c handler"),
         _ = quit_key() => tracing::info!("q pressed, shutting down"),
@@ -126,7 +196,7 @@ async fn quit_key() {
                     let _ = tx.send(());
                     return;
                 }
-                Ok(1) => {} // any other key: keep listening
+                Ok(1) => {}  // any other key: keep listening
                 _ => return, // EOF or error: fall back to Ctrl+C
             }
         }

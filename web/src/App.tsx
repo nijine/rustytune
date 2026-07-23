@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type Definition, type Status } from "./api";
 import { TelemetryFeed } from "./feed";
 import ConnectBar from "./components/ConnectBar";
+import ApplianceSettings from "./components/ApplianceSettings";
 import Gauge from "./components/Gauge";
 import GaugeTile from "./components/GaugeTile";
 import Indicators from "./components/Indicators";
@@ -11,6 +12,12 @@ import TuneFileView from "./components/TuneFileView";
 import TuneView from "./components/TuneView";
 
 type Tab = "dash" | "tune" | "settings" | "file" | "logs";
+type Layout = "auto" | "mobile" | "desktop";
+
+function Pairing({ onPaired }: { onPaired: () => void }) {
+  const [code,setCode]=useState(""); const [error,setError]=useState<string|null>(null); const [busy,setBusy]=useState(false); const [paired,setPaired]=useState(false);
+  return <main className="pairing"><h1>Pair with RustyTune</h1><p>{paired?"Paired. Loading dashboard…":"Enter the six-digit code shown on the appliance."}</p>{!paired&&<form onSubmit={async(e)=>{e.preventDefault();setBusy(true);setError(null);try{await api.pair(code);setPaired(true);window.setTimeout(onPaired,100)}catch(x){setError(x instanceof Error?x.message:"Pairing failed");setBusy(false)}}}><input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoFocus value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} aria-label="Pairing code"/><button className="primary" disabled={busy||code.length!==6}>{busy?"Pairing…":"Pair Device"}</button></form>}{error&&<p className="error">{error}</p>}</main>;
+}
 
 /// Dashboard look preferences, persisted per browser.
 interface DashPrefs {
@@ -69,6 +76,9 @@ export default function App() {
   const [definition, setDefinition] = useState<Definition | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [pairingRequired,setPairingRequired]=useState(false);
+  const [layout,setLayout]=useState<Layout>(()=>(localStorage.getItem("rustytune-layout") as Layout)||"auto");
+  const reload=()=>window.location.reload();
   // The active tab survives reloads (layout persistence).
   const [tab, setTabState] = useState<Tab>(() => {
     const saved = localStorage.getItem("rustytune-tab");
@@ -91,7 +101,7 @@ export default function App() {
     api
       .definition()
       .then(setDefinition)
-      .catch((e: Error) => setLoadError(e.message));
+      .catch((e: Error) => { if(e.message==="pairing required") setPairingRequired(true); else setLoadError(e.message) });
     api.status().then(setStatus).catch(() => {});
     feed.start();
     const offStatus = feed.onStatus(setStatus);
@@ -104,8 +114,9 @@ export default function App() {
     };
   }, [feed]);
 
+  if(pairingRequired) return <Pairing onPaired={reload}/>;
   return (
-    <div className="app">
+    <div className={`app layout-${layout}`}>
       <ConnectBar status={status} feed={feed} />
 
       {loadError && (
@@ -125,6 +136,7 @@ export default function App() {
               </button>
             ))}
           </nav>
+          <label className="layout-picker">Layout <select value={layout} onChange={e=>{const v=e.target.value as Layout;setLayout(v);localStorage.setItem("rustytune-layout",v)}}><option value="auto">Auto</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option></select></label>
           {tab === "dash" && (
             <>
               <div className="dash-options">
@@ -175,11 +187,14 @@ export default function App() {
             <TuneView feed={feed} offline={status?.offline ?? false} />
           )}
           {tab === "settings" && (
-            <SettingsView
-              feed={feed}
-              tuneLoaded={status?.tuneLoaded ?? false}
-              offline={status?.offline ?? false}
-            />
+            <>
+              <ApplianceSettings />
+              <SettingsView
+                feed={feed}
+                tuneLoaded={status?.tuneLoaded ?? false}
+                offline={status?.offline ?? false}
+              />
+            </>
           )}
           {tab === "file" && (
             <TuneFileView

@@ -199,8 +199,13 @@ export default function TableEditor({
       tabIndex={0}
       ref={containerRef}
       onKeyDown={onKeyDown}
-      onMouseUp={() => (dragging.current = false)}
-      onMouseLeave={() => (dragging.current = false)}
+      onPointerUp={(e) => { dragging.current = false; (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); }}
+      onPointerCancel={() => (dragging.current = false)}
+      onPointerMove={(e) => {
+        if (!dragging.current) return;
+        const cell=document.elementFromPoint(e.clientX,e.clientY)?.closest<HTMLElement>(".cell[data-row]");
+        if(cell) { const r=Number(cell.dataset.row), c=Number(cell.dataset.col); setSel(s=>s?{...s,r1:r,c1:c}:s); }
+      }}
     >
       <div className="table-flex">
         <div className="ylabels">
@@ -225,16 +230,15 @@ export default function TableEditor({
                     key={`${r}-${c}`}
                     className={`cell ${selected ? "sel" : ""} ${active ? "active" : ""}`}
                     style={{ background: bg, color: fg }}
-                    onMouseDown={(e) => {
+                    data-row={r}
+                    data-col={c}
+                    onPointerDown={(e) => {
                       e.preventDefault();
                       dragging.current = true;
+                      containerRef.current?.setPointerCapture?.(e.pointerId);
                       setEditText(null);
                       setSel({ r0: r, c0: c, r1: r, c1: c });
                       containerRef.current?.focus();
-                    }}
-                    onMouseEnter={() => {
-                      if (dragging.current)
-                        setSel((s) => (s ? { ...s, r1: r, c1: c } : s));
                     }}
                   >
                     {active && editText !== null ? (

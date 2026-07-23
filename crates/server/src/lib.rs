@@ -2,8 +2,11 @@
 //! The binary (`main.rs`) is a thin CLI wrapper; integration tests drive
 //! this same router in-process.
 
+pub mod admin;
 pub mod api;
+pub mod auth;
 pub mod comms;
+pub mod config;
 pub mod definition;
 
 use std::path::PathBuf;
@@ -16,6 +19,7 @@ use axum::{
     routing::{get, post},
 };
 use rust_embed::RustEmbed;
+use std::time::Duration;
 use tokio::sync::broadcast;
 
 use api::{AppState, SharedState};
@@ -58,12 +62,39 @@ pub fn build_state_with_symbols(
         msq: Mutex::new(None),
         symbols,
         log_dir,
+        runtime: Arc::new(config::RuntimeConfig::desktop()),
+        auth: Arc::new(auth::AuthState::new(false, ".".into())),
     })
 }
 
+pub fn build_appliance_state(
+    def: ts_ini::IniDef,
+    symbols: Vec<String>,
+    runtime: config::RuntimeConfig,
+) -> SharedState {
+    let state = build_state_with_symbols(def, symbols, runtime.logging.directory.clone());
+    // Construction is private to this module, so replace the immutable profile
+    // before any clones are handed to request tasks.
+    let mut owned = Arc::try_unwrap(state).ok().expect("fresh state");
+    owned.auth = Arc::new(auth::AuthState::new(
+        runtime.authentication.required,
+        runtime.authentication.state_directory.clone(),
+    ));
+    owned.runtime = Arc::new(runtime);
+    Arc::new(owned)
+}
+
 pub fn app(state: SharedState) -> Router {
+    let auth = state.auth.clone();
     Router::new()
         .route("/api/health", get(api::health))
+        .route("/api/pair", post(auth::pair))
+        .route("/api/session/logout", post(auth::logout))
+        .route(
+            "/api/appliance/config",
+            get(api::appliance_config).put(api::appliance_config_put),
+        )
+        .route("/api/appliance/pairing", post(api::pairing_open))
         .route("/api/ports", get(api::ports))
         .route("/api/status", get(api::status))
         .route("/api/definition", get(api::definition))
@@ -101,6 +132,43 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/ws", get(api::ws))
         .fallback(static_assets)
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            auth,
+            auth::require_auth,
+        ))
+}
+
+/// Appliance retry supervisor. It never makes the HTTP server unavailable.
+pub fn spawn_auto_connect(state: SharedState) {
+    if !state.runtime.ecu.auto_connect {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut delay = Duration::from_secs(1);
+        loop {
+            if !state.status.lock().unwrap().connected {
+                let cfg = &state.runtime.ecu;
+                let req = api::ConnectReq {
+                    port: cfg.device.clone(),
+                    baud: cfg.baud,
+                    mode: cfg.mode.clone(),
+                    poll_ms: cfg.poll_ms,
+                };
+                let s = state.clone();
+                let ok = tokio::task::spawn_blocking(move || api::do_connect(&s, req))
+                    .await
+                    .is_ok_and(|r| r.is_ok());
+                if ok {
+                    delay = Duration::from_secs(1);
+                } else {
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(30));
+                    continue;
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
 }
 
 /// Serve the embedded frontend; unknown extensionless paths fall back to

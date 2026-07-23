@@ -1,7 +1,7 @@
 // One canvas dial gauge: 270° sweep, warn/danger zone arcs from the INI's
 // gauge configuration, needle eased toward the live value each frame.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GaugeUi } from "../api";
 import type { TelemetryFeed } from "../feed";
 import { C } from "../tokens";
@@ -25,9 +25,31 @@ export default function Gauge({
   def: GaugeUi;
   feed: TelemetryFeed;
 }) {
+  const figureRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [active, setActive] = useState(false);
+
+  // A full Speeduino definition can contain around 90 gauges. Allocating a
+  // high-DPI canvas and animation loop for every off-screen gauge at once can
+  // stall mobile browsers immediately after pairing. Keep a generous preload
+  // margin so scrolling is seamless while only nearby gauges consume memory.
+  useEffect(() => {
+    const figure = figureRef.current;
+    if (!figure) return;
+    if (!("IntersectionObserver" in window)) {
+      setActive(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setActive(entry.isIntersecting),
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(figure);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
+    if (!active) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -138,16 +160,24 @@ export default function Gauge({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [def, feed]);
+  }, [active, def, feed]);
 
   return (
-    <figure className="gauge">
-      <canvas
-        ref={canvasRef}
-        style={{ width: SIZE, height: SIZE }}
-        role="img"
-        aria-label={`${def.title} gauge`}
-      />
+    <figure className="gauge" ref={figureRef}>
+      {active ? (
+        <canvas
+          ref={canvasRef}
+          style={{ width: SIZE, height: SIZE }}
+          role="img"
+          aria-label={`${def.title} gauge`}
+        />
+      ) : (
+        <div
+          className="gauge-placeholder"
+          style={{ width: SIZE, height: SIZE }}
+          aria-label={`${def.title} gauge loading`}
+        />
+      )}
       <figcaption>{def.title}</figcaption>
     </figure>
   );

@@ -1,0 +1,30 @@
+[server]
+bind = "0.0.0.0"
+port = 80
+open_browser = false
+admin_socket = "/run/rustytune/admin.sock"
+
+[ecu]
+device = "/dev/serial0"
+mode = "primary"
+baud = 115200
+poll_ms = 50
+auto_connect = true
+
+[logging]
+directory = "/var/log/speeduino"
+auto = true
+retention_bytes = 2147483648
+
+[engine_shutdown]
+enabled = false
+arm_rpm = 500.0
+stop_rpm = 50.0
+delay_seconds = 15
+
+[authentication]
+required = true
+state_directory = "/var/lib/rustytune"
+
+[captive_portal]
+enabled = true

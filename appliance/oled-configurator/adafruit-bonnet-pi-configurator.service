@@ -1,0 +1,19 @@
+[Unit]
+Description=Adafruit OLED Bonnet Pi Configurator (Native C)
+After=network-online.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={{PROJECT_DIR}}
+ExecStart={{PROJECT_DIR}}/pi_configurator_c
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

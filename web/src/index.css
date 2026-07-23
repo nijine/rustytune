@@ -28,6 +28,32 @@ body {
   color: var(--ink);
 }
 
+.layout-picker { display:flex; justify-content:flex-end; align-items:center; gap:6px; color:var(--muted); font-size:.72rem; }
+.pairing { max-width:420px; margin:12vh auto; padding:24px; text-align:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+.pairing form { display:flex; gap:10px; justify-content:center; }
+.pairing input { width:150px; font-size:1.5rem; letter-spacing:.25em; text-align:center; }
+
+@media (max-width: 700px), (pointer: coarse) {
+  .layout-auto.app { padding-left:max(10px,env(safe-area-inset-left)); padding-right:max(10px,env(safe-area-inset-right)); padding-bottom:max(18px,env(safe-area-inset-bottom)); }
+  .layout-auto .bar { position:sticky; top:0; z-index:30; background:var(--page); gap:8px; }
+  .layout-auto .controls { width:100%; display:grid; grid-template-columns:1fr 1fr; }
+  .layout-auto .controls input, .layout-auto .controls select { width:100%; }
+  .layout-auto .tabs { position:sticky; top:57px; z-index:25; overflow-x:auto; background:var(--page); }
+  .layout-auto .tab { flex:0 0 auto; }
+  .layout-auto .gauges { grid-template-columns:1fr; }
+  .layout-auto .gauge-tiles { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .layout-auto .log-layout { display:block; }
+  .layout-auto .log-channels { max-height:180px; margin-bottom:10px; }
+  .layout-auto .log-panel { position:fixed; left:10px; right:10px; min-width:0; }
+  .layout-auto button, .layout-auto select, .layout-auto input { min-height:44px; }
+  .layout-auto .dash-options { flex-direction:column; align-items:flex-end; }
+  .layout-auto .table-wrap, .layout-auto .curve-editor { overflow-x:auto; touch-action:pan-x pan-y; }
+}
+.layout-mobile.app { max-width:700px; padding-left:max(10px,env(safe-area-inset-left)); padding-right:max(10px,env(safe-area-inset-right)); }
+.layout-mobile .gauges { grid-template-columns:1fr; }
+.layout-mobile .gauge-tiles { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.layout-mobile button,.layout-mobile select,.layout-mobile input { min-height:44px; }
+
 .app {
   max-width: 1040px;
   margin: 0 auto;
@@ -67,6 +93,11 @@ body {
 .dot.ok {
   background: var(--good);
   border-color: var(--good);
+}
+
+.dot.waiting {
+  background: var(--warning);
+  border-color: var(--warning);
 }
 
 .controls {
@@ -283,6 +314,11 @@ button.ghost {
 .gauge {
   margin: 0;
   text-align: center;
+}
+
+.gauge-placeholder {
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--surface) 0 58%, transparent 59%);
 }
 
 .gauge figcaption {
@@ -669,6 +705,54 @@ button.burn-needed {
 }
 
 /* Settings tab: INI menu sidebar + generated dialog forms */
+.appliance-settings {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.appliance-settings h2,
+.appliance-settings p {
+  margin: 0;
+}
+
+.shutdown-enabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.appliance-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.appliance-fields > label {
+  display: grid;
+  gap: 4px;
+  color: var(--secondary);
+  font-size: 0.78rem;
+}
+
+.appliance-fields span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appliance-fields input {
+  width: 92px;
+}
+
+.appliance-settings > button {
+  justify-self: start;
+}
+
 .settings-view {
   display: flex;
   gap: 16px;

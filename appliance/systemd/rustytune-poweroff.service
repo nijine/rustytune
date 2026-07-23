@@ -1,0 +1,7 @@
+[Unit]
+Description=Power off after RustyTune closes the engine log
+ConditionPathExists=/run/rustytune/poweroff-request
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --no-block poweroff

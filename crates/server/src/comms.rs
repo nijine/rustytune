@@ -18,6 +18,7 @@ use tokio::sync::broadcast;
 use ts_ini::{IniDef, SymbolSource, Telemetry, Value};
 use tune_model::Tune;
 
+use crate::config::EngineShutdownConfig;
 use crate::definition::Defaults;
 
 pub enum Cmd {
@@ -89,6 +90,11 @@ pub struct CommsCtx {
     pub tune: Arc<Mutex<Tune>>,
     /// Page command set; `None` on the secondary serial (telemetry-only).
     pub pages: Option<PageCommands>,
+    pub auto_log: bool,
+    pub log_dir: PathBuf,
+    pub retention_bytes: u64,
+    pub engine_shutdown: EngineShutdownConfig,
+    pub shutdown_request_path: Option<PathBuf>,
 }
 
 /// Build the page command set from the INI header (primary mode).
@@ -226,6 +232,49 @@ fn build_frame(
 /// (polling continues — the ECU may come back after a power cycle).
 const SILENT_POLLS_BEFORE_ERROR: u32 = 3;
 
+struct EngineShutdownMonitor {
+    config: EngineShutdownConfig,
+    armed: bool,
+    stopped_since: Option<Instant>,
+    requested: bool,
+}
+
+impl EngineShutdownMonitor {
+    fn new(config: EngineShutdownConfig) -> Self {
+        Self {
+            config,
+            armed: false,
+            stopped_since: None,
+            requested: false,
+        }
+    }
+
+    fn observe(&mut self, rpm: Option<f64>, now: Instant) -> bool {
+        if !self.config.enabled || self.requested {
+            return false;
+        }
+        let Some(rpm) = rpm.filter(|value| value.is_finite()) else {
+            self.stopped_since = None;
+            return false;
+        };
+        if rpm >= self.config.arm_rpm {
+            self.armed = true;
+            self.stopped_since = None;
+            return false;
+        }
+        if !self.armed || rpm > self.config.stop_rpm {
+            self.stopped_since = None;
+            return false;
+        }
+        let since = self.stopped_since.get_or_insert(now);
+        if now.duration_since(*since) >= Duration::from_secs(self.config.delay_seconds) {
+            self.requested = true;
+            return true;
+        }
+        false
+    }
+}
+
 pub fn spawn(
     session: Session<SerialTransport>,
     ctx: CommsCtx,
@@ -293,6 +342,8 @@ fn run(
 
     let start = Instant::now();
     let mut log: Option<MslWriter> = None;
+    let mut auto_log_enabled = ctx.auto_log;
+    let mut shutdown_monitor = EngineShutdownMonitor::new(ctx.engine_shutdown.clone());
     let mut consecutive_timeouts = 0u32;
     let mut next_poll = Instant::now();
 
@@ -329,6 +380,9 @@ fn run(
                     broadcast_status(&ctx);
                 }
                 Cmd::StopLog { reply } => {
+                    // A manual stop pauses automatic logging until the next
+                    // ECU connection/session.
+                    auto_log_enabled = false;
                     let summary = finish_log(&ctx, &mut log);
                     let _ = reply.send(summary);
                     broadcast_status(&ctx);
@@ -355,6 +409,25 @@ fn run(
 
         match session.read_realtime() {
             Ok(block) => {
+                if auto_log_enabled && log.is_none() {
+                    let path = ctx.log_dir.join(format!(
+                        "rustytune_{}.msl",
+                        chrono::Local::now().format("%Y%m%d_%H%M%S")
+                    ));
+                    match start_log(&ctx, &path) {
+                        Ok(writer) => {
+                            ctx.status.lock().unwrap().log = Some(LogStatus {
+                                path: path.display().to_string(),
+                                rows: 0,
+                            });
+                            log = Some(writer);
+                        }
+                        Err(e) => {
+                            ctx.status.lock().unwrap().last_error =
+                                Some(format!("automatic logging: {e}"))
+                        }
+                    }
+                }
                 let had_error = consecutive_timeouts >= SILENT_POLLS_BEFORE_ERROR;
                 consecutive_timeouts = 0;
                 let t = start.elapsed().as_secs_f64();
@@ -389,6 +462,29 @@ fn run(
                     broadcast_status(&ctx); // recovered
                 }
                 let _ = ctx.events.send(json);
+
+                if shutdown_monitor.observe(numeric.get("rpm").copied(), Instant::now()) {
+                    tracing::info!(
+                        "engine stopped; closing datalog and requesting appliance shutdown"
+                    );
+                    finish_log(&ctx, &mut log);
+                    broadcast_status(&ctx);
+                    let request = ctx
+                        .shutdown_request_path
+                        .as_ref()
+                        .ok_or_else(|| "shutdown request path is not configured".to_owned())
+                        .and_then(|path| {
+                            std::fs::write(path, b"shutdown\n")
+                                .map_err(|e| format!("write {}: {e}", path.display()))
+                        });
+                    if let Err(e) = request {
+                        tracing::error!("automatic shutdown request failed: {e}");
+                        ctx.status.lock().unwrap().last_error =
+                            Some(format!("automatic shutdown request failed: {e}"));
+                        broadcast_status(&ctx);
+                    }
+                    return;
+                }
             }
             Err(ProtoError::CrcMismatch) => {
                 ctx.status.lock().unwrap().crc_errors += 1;
@@ -407,6 +503,7 @@ fn run(
                 // Io/EcuError: treat the connection as gone.
                 tracing::error!("comms error, disconnecting: {e}");
                 finish_log(&ctx, &mut log);
+                prune_logs(&ctx);
                 ctx.tune.lock().unwrap().set_loaded(false);
                 let mut status = ctx.status.lock().unwrap();
                 status.connected = false;
@@ -417,6 +514,86 @@ fn run(
                 broadcast_status(&ctx);
                 broadcast_tune(&ctx);
                 return;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> EngineShutdownConfig {
+        EngineShutdownConfig {
+            enabled: true,
+            arm_rpm: 500.0,
+            stop_rpm: 50.0,
+            delay_seconds: 15,
+        }
+    }
+
+    #[test]
+    fn shutdown_requires_running_engine_then_continuous_stop_delay() {
+        let start = Instant::now();
+        let mut monitor = EngineShutdownMonitor::new(config());
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(30)));
+        assert!(!monitor.observe(Some(800.0), start + Duration::from_secs(31)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(32)));
+        assert!(!monitor.observe(Some(100.0), start + Duration::from_secs(40)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(41)));
+        assert!(monitor.observe(Some(0.0), start + Duration::from_secs(56)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(57)));
+    }
+
+    #[test]
+    fn missing_rpm_resets_stop_countdown() {
+        let start = Instant::now();
+        let mut monitor = EngineShutdownMonitor::new(config());
+        assert!(!monitor.observe(Some(700.0), start));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(1)));
+        assert!(!monitor.observe(None, start + Duration::from_secs(10)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(16)));
+        assert!(monitor.observe(Some(0.0), start + Duration::from_secs(31)));
+    }
+}
+
+fn prune_logs(ctx: &CommsCtx) {
+    if ctx.retention_bytes == 0 {
+        return;
+    }
+    let active = ctx
+        .status
+        .lock()
+        .unwrap()
+        .log
+        .as_ref()
+        .map(|l| PathBuf::from(&l.path));
+    let Ok(rd) = std::fs::read_dir(&ctx.log_dir) else {
+        return;
+    };
+    let mut files: Vec<_> = rd
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "msl") && Some(&p) != active.as_ref() {
+                let m = e.metadata().ok()?;
+                Some((m.modified().ok()?, m.len(), p))
+            } else {
+                None
+            }
+        })
+        .collect();
+    files.sort_by_key(|x| x.0);
+    let mut total: u64 = files.iter().map(|x| x.1).sum();
+    for (_, size, path) in files {
+        if total <= ctx.retention_bytes {
+            break;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => total = total.saturating_sub(size),
+            Err(e) => {
+                ctx.status.lock().unwrap().last_error =
+                    Some(format!("log retention {}: {e}", path.display()))
             }
         }
     }
@@ -562,11 +739,13 @@ fn finish_log(ctx: &CommsCtx, log: &mut Option<MslWriter>) -> Option<LogSummary>
     let writer = log.take()?;
     ctx.status.lock().unwrap().log = None;
     let rows = writer.rows();
-    match writer.finish() {
+    let result = match writer.finish() {
         Ok(path) => Some(LogSummary { path, rows }),
         Err(e) => {
             tracing::error!("closing datalog failed: {e}");
             None
         }
-    }
+    };
+    prune_logs(ctx);
+    result
 }
