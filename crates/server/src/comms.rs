@@ -519,44 +519,6 @@ fn run(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config() -> EngineShutdownConfig {
-        EngineShutdownConfig {
-            enabled: true,
-            arm_rpm: 500.0,
-            stop_rpm: 50.0,
-            delay_seconds: 15,
-        }
-    }
-
-    #[test]
-    fn shutdown_requires_running_engine_then_continuous_stop_delay() {
-        let start = Instant::now();
-        let mut monitor = EngineShutdownMonitor::new(config());
-        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(30)));
-        assert!(!monitor.observe(Some(800.0), start + Duration::from_secs(31)));
-        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(32)));
-        assert!(!monitor.observe(Some(100.0), start + Duration::from_secs(40)));
-        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(41)));
-        assert!(monitor.observe(Some(0.0), start + Duration::from_secs(56)));
-        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(57)));
-    }
-
-    #[test]
-    fn missing_rpm_resets_stop_countdown() {
-        let start = Instant::now();
-        let mut monitor = EngineShutdownMonitor::new(config());
-        assert!(!monitor.observe(Some(700.0), start));
-        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(1)));
-        assert!(!monitor.observe(None, start + Duration::from_secs(10)));
-        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(16)));
-        assert!(monitor.observe(Some(0.0), start + Duration::from_secs(31)));
-    }
-}
-
 fn prune_logs(ctx: &CommsCtx) {
     if ctx.retention_bytes == 0 {
         return;
@@ -748,4 +710,42 @@ fn finish_log(ctx: &CommsCtx, log: &mut Option<MslWriter>) -> Option<LogSummary>
     };
     prune_logs(ctx);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> EngineShutdownConfig {
+        EngineShutdownConfig {
+            enabled: true,
+            arm_rpm: 500.0,
+            stop_rpm: 50.0,
+            delay_seconds: 15,
+        }
+    }
+
+    #[test]
+    fn shutdown_requires_running_engine_then_continuous_stop_delay() {
+        let start = Instant::now();
+        let mut monitor = EngineShutdownMonitor::new(config());
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(30)));
+        assert!(!monitor.observe(Some(800.0), start + Duration::from_secs(31)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(32)));
+        assert!(!monitor.observe(Some(100.0), start + Duration::from_secs(40)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(41)));
+        assert!(monitor.observe(Some(0.0), start + Duration::from_secs(56)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(57)));
+    }
+
+    #[test]
+    fn missing_rpm_resets_stop_countdown() {
+        let start = Instant::now();
+        let mut monitor = EngineShutdownMonitor::new(config());
+        assert!(!monitor.observe(Some(700.0), start));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(1)));
+        assert!(!monitor.observe(None, start + Duration::from_secs(10)));
+        assert!(!monitor.observe(Some(0.0), start + Duration::from_secs(16)));
+        assert!(monitor.observe(Some(0.0), start + Duration::from_secs(31)));
+    }
 }
