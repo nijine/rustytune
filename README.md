@@ -1,20 +1,16 @@
 # rustytune
 
-RustyTune supports a default standalone desktop profile and an explicit
-Raspberry Pi appliance profile. See [docs/raspberry-pi-appliance.md](docs/raspberry-pi-appliance.md)
-for safe installation, validation, pairing, and rollback.
+RustyTune is open-source tuning software for
+[Speeduino](https://speeduino.com) ECUs and a native alternative to
+TunerStudio for the day-to-day tuning loop. It connects to an ECU over serial
+and provides a browser-based interface for live gauges, VE/ignition/AFR table
+and settings editing, EEPROM burns, datalogging and playback, tune comparison,
+and offline `.msq` editing.
 
-Pi deployment assets live under [`appliance/`](appliance/), including the
-independently buildable native OLED configurator. Run `make appliance-check`
-to verify the RustyTune server and OLED companion together.
-
-Open-source tuning software for [Speeduino](https://speeduino.com) ECUs — a
-native alternative to TunerStudio for the day-to-day tuning loop:
-realtime gauges, VE/ignition/AFR table editing, burn, and datalogging.
-
-One Rust binary owns the ECU serial port and serves a browser UI on
-`127.0.0.1`. Run it on the laptop next to the car over USB serial, or (later)
-headless on an in-car Raspberry Pi and tune from any device on its network.
+A single Rust binary owns the ECU connection and serves the web UI. RustyTune
+can run as a standalone desktop application on the laptop connected to the vehicle,
+or as a headless Raspberry Pi appliance that can be accessed from another
+device on the Pi's network.
 
 **Status: it tunes.** Connect over USB (primary) or SER3 (secondary),
 watch the INI-defined gauges live, record MegaLogViewer `.msl` datalogs,
@@ -31,6 +27,17 @@ then save it back out.
 `make release` builds a single-file binary tarball for this machine;
 tagging `v*` builds macOS arm64 + Linux x86_64/arm64 release artifacts in
 CI (Linux arm64 covers the Raspberry Pi).
+
+## Deployment profiles
+
+RustyTune supports a default standalone desktop profile and an explicit
+Raspberry Pi appliance profile. See
+[docs/raspberry-pi-appliance.md](docs/raspberry-pi-appliance.md) for safe
+installation, validation, pairing, and rollback.
+
+Pi deployment assets live under [`appliance/`](appliance/), including the
+independently buildable native OLED configurator. Run `make appliance-check`
+to verify the RustyTune server and OLED companion together.
 
 ## Architecture
 
@@ -56,7 +63,7 @@ make dev        # Vite dev server with HMR (run the server separately)
 make bench      # hardware-free test bench (see below)
 ```
 
-## Test bench — no car required
+## Test bench — no vehicle required
 
 `make bench` (or `tools/bench.sh`) starts a simulated Speeduino on a pty
 and the server against it. The port shows up in the picker as
@@ -78,7 +85,7 @@ tools/bench.sh --corrupt-every 50   # inject CRC errors to watch recovery
 Because the simulator speaks the same Protocol 3 the firmware does (page
 reads/writes, `d` CRC checks, burn semantics, error codes), anything
 that works on the bench is exercising the identical code path used at
-the car — only the transport endpoint differs.
+the vehicle — only the transport endpoint differs.
 
 ## ECU definitions
 

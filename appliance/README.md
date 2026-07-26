@@ -1,5 +1,20 @@
 # RustyTune appliance
 
+The RustyTune appliance turns a Raspberry Pi into a dedicated, always-available
+interface for a Speeduino ECU. The Pi connects directly to the ECU over serial,
+runs the RustyTune server, records datalogs, and serves the browser-based tuning
+interface over the vehicle's local network. A phone, tablet, or laptop can then
+connect to the Pi to view live gauges, tune the ECU, manage logs, and use the
+rest of RustyTune without needing to own the ECU's serial connection itself.
+
+It is intended to be installed in a vehicle as a headless companion to the ECU.
+The appliance starts RustyTune automatically, reconnects to the ECU when
+necessary, and can provide its own Wi-Fi access point when another network is
+not available. An optional Adafruit OLED Bonnet provides on-device controls for
+network setup, RustyTune status and configuration, pairing, and basic system
+administration. Browser access is protected by pairing, while privileged
+operations remain isolated behind local services.
+
 This directory contains the Linux/Raspberry Pi integration around the portable
 RustyTune binary:
 
