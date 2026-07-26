@@ -94,6 +94,19 @@ parser is developed and golden-tested against. At runtime the server loads
 the INI matching your firmware, so a firmware update is a new INI file, not
 a code change.
 
+## Note on Windows builds
+
+The project was originally intended to be cross-platform compatible in a
+similar manner to the TunerStudio software that it was inspired by. However,
+serial communication was originally modeled in a \*nix-only environment,
+and has to be updated to support Windows. This is listed as one of the TODOs
+below.
+
+## TODOs
+
+- Add Windows build support & matching CI workflow
+- Add autotune functionality
+
 ## License
 
 rustytune is free software: **GPL-3.0-or-later**, with one addition —
