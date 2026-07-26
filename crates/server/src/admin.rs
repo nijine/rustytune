@@ -62,15 +62,15 @@ async fn handle(state: crate::api::SharedState, stream: tokio::net::UnixStream) 
                 if let Some(v) = request.get("device").and_then(|v| v.as_str()) {
                     cfg.ecu.device = v.to_owned()
                 }
-                if let Some(v) = request.get("mode").and_then(|v| v.as_str()) {
-                    if matches!(v, "primary" | "secondary") {
-                        cfg.ecu.mode = v.to_owned()
-                    }
+                if let Some(v) = request.get("mode").and_then(|v| v.as_str())
+                    && matches!(v, "primary" | "secondary")
+                {
+                    cfg.ecu.mode = v.to_owned()
                 }
-                if let Some(v) = request.get("baud").and_then(|v| v.as_u64()) {
-                    if (1_200..=1_000_000).contains(&v) {
-                        cfg.ecu.baud = v as u32
-                    }
+                if let Some(v) = request.get("baud").and_then(|v| v.as_u64())
+                    && (1_200..=1_000_000).contains(&v)
+                {
+                    cfg.ecu.baud = v as u32
                 }
                 if let Some(v) = request.get("autoLog").and_then(|v| v.as_bool()) {
                     cfg.logging.auto = v

@@ -65,7 +65,7 @@ pub struct AuthenticationConfig {
     pub required: bool,
     pub state_directory: PathBuf,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CaptivePortalConfig {
     pub enabled: bool,
@@ -211,12 +211,6 @@ impl Default for AuthenticationConfig {
         }
     }
 }
-impl Default for CaptivePortalConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
