@@ -57,6 +57,25 @@ impl SerialTransport {
             .open(path)?;
         let fd = file.as_raw_fd();
 
+        // A stale simulator symlink can have its old pty number reused by
+        // this process's controlling terminal. Never put stdin's terminal
+        // into serial/raw mode: that would disable terminal input and ISIG,
+        // making even Ctrl+C appear to stop working.
+        unsafe {
+            let mut opened: libc::stat = std::mem::zeroed();
+            let mut stdin: libc::stat = std::mem::zeroed();
+            if libc::fstat(fd, &mut opened) == 0
+                && libc::fstat(libc::STDIN_FILENO, &mut stdin) == 0
+                && libc::isatty(libc::STDIN_FILENO) == 1
+                && opened.st_rdev == stdin.st_rdev
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "refusing to use the server terminal as a serial port",
+                ));
+            }
+        }
+
         // SAFETY: fd is a valid open descriptor; termios is a plain struct
         // fully initialized by tcgetattr before use.
         unsafe {

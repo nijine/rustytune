@@ -97,6 +97,24 @@ fn looks_usb(name: &str) -> bool {
     .any(|p| lower.contains(p))
 }
 
+/// Simulator links are accompanied by a pid file written by bench.sh.
+/// Requiring the process to still exist prevents an abandoned pty symlink
+/// from pointing at a terminal whose device number was later reused.
+fn live_simulator(path: &std::path::Path) -> bool {
+    let pid_file = path.with_extension("pid");
+    let Ok(pid) = std::fs::read_to_string(pid_file) else {
+        return false;
+    };
+    let Ok(pid) = pid.trim().parse::<libc::pid_t>() else {
+        return false;
+    };
+    if pid <= 0 || !path.exists() {
+        return false;
+    }
+    // Signal 0 only checks for the process; it does not deliver a signal.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
 pub async fn ports() -> Json<Vec<PortInfo>> {
     let mut out: Vec<PortInfo> = std::fs::read_dir("/dev")
         .map(|rd| {
@@ -116,7 +134,8 @@ pub async fn ports() -> Json<Vec<PortInfo>> {
     if let Ok(rd) = std::fs::read_dir("/tmp") {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with("rustytune-sim") {
+            let is_link = e.file_type().is_ok_and(|kind| kind.is_symlink());
+            if name.starts_with("rustytune-sim") && is_link && live_simulator(&e.path()) {
                 out.push(PortInfo {
                     path: format!("/tmp/{name}"),
                     usb: false,
@@ -1540,5 +1559,21 @@ mod tests {
         assert!(looks_usb("cu.usbmodem101"));
         assert!(looks_usb("ttyUSB0"));
         assert!(!looks_usb("cu.Bluetooth-Incoming-Port"));
+    }
+
+    #[test]
+    fn simulator_requires_live_pid_marker() {
+        let path = std::env::temp_dir().join(format!("rustytune-sim-test-{}", std::process::id()));
+        let pid_file = path.with_extension("pid");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&pid_file);
+        std::os::unix::fs::symlink("/dev/null", &path).unwrap();
+
+        assert!(!live_simulator(&path));
+        std::fs::write(&pid_file, format!("{}\n", std::process::id())).unwrap();
+        assert!(live_simulator(&path));
+
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(pid_file).unwrap();
     }
 }

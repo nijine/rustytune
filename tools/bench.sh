@@ -14,6 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 LINK=/tmp/rustytune-sim
+PID_FILE=${LINK}.pid
 STORAGE=tools/fake-ecu/bench-tune.json
 
 if [ ! -f web/dist/index.html ]; then
@@ -25,7 +26,8 @@ python3 tools/fake-ecu/fake_ecu.py \
     --mode primary --och-size 127 \
     --link "$LINK" --storage "$STORAGE" "$@" &
 ECU_PID=$!
-trap 'kill "$ECU_PID" 2>/dev/null || true' EXIT
+printf '%s\n' "$ECU_PID" > "$PID_FILE"
+trap 'kill "$ECU_PID" 2>/dev/null || true; rm -f "$LINK" "$PID_FILE"' EXIT
 
 for _ in $(seq 50); do
     [ -e "$LINK" ] && break
