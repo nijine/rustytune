@@ -33,7 +33,7 @@ struct Assets;
 
 /// The Speeduino INI compiled into the binary as the out-of-box definition;
 /// `--ini` overrides it for other firmware versions.
-pub const EMBEDDED_INI: &str = include_str!("../../../fixtures/speeduino202405_dev.ini");
+pub const EMBEDDED_INI: &str = include_str!("../../../fixtures/speeduino202501_7.ini");
 
 pub fn build_state(def: ts_ini::IniDef, log_dir: PathBuf) -> SharedState {
     build_state_with_symbols(def, Vec::new(), log_dir)

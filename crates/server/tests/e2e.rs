@@ -23,7 +23,7 @@ impl FakeEcu {
 
         let child = Command::new("python3")
             .arg(&script)
-            .args(["--mode", "primary", "--static", "--och-size", "127"])
+            .args(["--mode", "primary", "--static", "--och-size", "130"])
             .args(["--link", link.to_str().unwrap()])
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -74,7 +74,7 @@ async fn browser_workflow() {
         .json()
         .await
         .unwrap();
-    assert_eq!(definition["signature"], "speeduino 202405-dev");
+    assert_eq!(definition["signature"], "speeduino 202501");
     assert_eq!(definition["gauges"][0]["channel"], "rpm");
     assert_eq!(definition["gauges"][0]["hi"], 8000.0);
     let n_indicators = definition["indicators"].as_array().unwrap().len();
@@ -157,7 +157,7 @@ async fn browser_workflow() {
         .json()
         .await
         .unwrap();
-    assert_eq!(status["ecuSignature"], "speeduino 202405-dev");
+    assert_eq!(status["ecuSignature"], "speeduino 202501");
     assert_eq!(status["lastError"], serde_json::Value::Null);
 
     // Tune download: poll until every page is in and CRC-verified.
@@ -491,8 +491,8 @@ async fn browser_workflow() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    // .msq upload: the real TunerStudio file (202501) against the 202405-dev
-    // definition — diff still works name-wise, mismatch is surfaced.
+    // .msq upload: the real TunerStudio 202501 file against the matching
+    // embedded definition; diff still works name-wise.
     let msq_content =
         tune_model::msq::decode_latin1(include_bytes!("../../../fixtures/CurrentTune.msq"));
     let meta: serde_json::Value = http
@@ -505,7 +505,7 @@ async fn browser_workflow() {
         .await
         .unwrap();
     assert_eq!(meta["signature"], "speeduino 202501");
-    assert_eq!(meta["signatureMatch"], false);
+    assert_eq!(meta["signatureMatch"], true);
 
     let diff: serde_json::Value = http
         .get(format!("{base}/msq/diff"))
@@ -578,7 +578,7 @@ async fn browser_workflow() {
         .to_string();
     assert!(disposition.contains(".msq"), "{disposition}");
     let body = saved.text().await.unwrap();
-    assert!(body.contains("signature=\"speeduino 202405-dev\""));
+    assert!(body.contains("signature=\"speeduino 202501\""));
     let reparsed = tune_model::msq::parse(&body).unwrap();
     assert!(reparsed.constants.len() > 500);
 

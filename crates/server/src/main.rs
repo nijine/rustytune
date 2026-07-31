@@ -34,7 +34,7 @@ struct Args {
     #[arg(long)]
     no_open: bool,
 
-    /// ECU definition INI (default: the embedded Speeduino 202405-dev INI)
+    /// ECU definition INI (default: the embedded Speeduino 202501 INI)
     #[arg(long)]
     ini: Option<PathBuf>,
 

@@ -647,7 +647,7 @@ pub(crate) mod tests_support {
     pub fn fixture() -> Arc<IniDef> {
         static DEF: std::sync::OnceLock<Arc<IniDef>> = std::sync::OnceLock::new();
         DEF.get_or_init(|| {
-            let src = include_str!("../../../fixtures/speeduino202405_dev.ini");
+            let src = include_str!("../../../fixtures/speeduino202501_7.ini");
             Arc::new(ts_ini::parse(src).unwrap())
         })
         .clone()

@@ -24,7 +24,7 @@ fn assert_channel(telemetry: &Telemetry, name: &str, expected: f64) {
 
 /// The --static reference block, decoded through the real INI definitions.
 fn assert_reference_values(def: &IniDef, block: &[u8]) {
-    assert_eq!(block.len(), 127);
+    assert_eq!(block.len(), 130);
     let t = Telemetry::new(def, block);
     assert_channel(&t, "rpm", 3450.0);
     assert_channel(&t, "map", 98.0);

@@ -156,7 +156,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> IniDef {
-        let src = include_str!("../../../fixtures/speeduino202405_dev.ini");
+        let src = include_str!("../../../fixtures/speeduino202501_7.ini");
         ts_ini::parse(src).unwrap()
     }
 
@@ -165,7 +165,7 @@ mod tests {
         let def = fixture();
         let ui = definition_ui(&def, &Defaults::from_ini(&def));
 
-        assert_eq!(ui.signature, "speeduino 202405-dev");
+        assert_eq!(ui.signature, "speeduino 202501");
         assert_eq!(ui.gauges.len(), 8, "fixture front page has 8 gauges");
 
         let tach = &ui.gauges[0];

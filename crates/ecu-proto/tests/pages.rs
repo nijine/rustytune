@@ -38,7 +38,7 @@ fn signature_version_and_comms_check() {
     // queryCommand = "Q" answers the INI signature.
     let signature = session.query_string(&def.query_command).unwrap();
     assert_eq!(signature, def.signature);
-    assert_eq!(signature, "speeduino 202405-dev");
+    assert_eq!(signature, "speeduino 202501");
 
     // versionInfo = "S" answers the display string.
     let product = session.query_string(&def.version_info).unwrap();

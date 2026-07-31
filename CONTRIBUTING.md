@@ -29,5 +29,5 @@ submit it under the project's license.
 - `make bench` gives you a hardware-free Speeduino to test against.
 - The web build embeds into the server binary — run `make web` before
   `cargo build` if the UI seems stale.
-- `fixtures/speeduino202405_dev.ini` comes from the Speeduino project
+- `fixtures/speeduino202501_7.ini` comes from the Speeduino project
   and stays under its own license; don't mix project code into it.

@@ -2,7 +2,7 @@
 """Fake Speeduino ECU for developing rustytune without hardware.
 
 Vendored from ../speeduino-fake-ecu (the standalone project) and extended:
-primary mode speaks the enveloped Protocol 3 command set of the 202405-dev
+primary mode speaks the enveloped Protocol 3 command set of the 202501
 firmware (verified against speeduino/speeduino comms.cpp, whose dispatch is
 identical from 202402.3 through 202501.7):
 
@@ -12,8 +12,8 @@ identical from 202402.3 through 202501.7):
   'M'            page chunk write (same header + value bytes)
   'b'/'B'        burn page to "EEPROM" -> replies SERIAL_RC_BURN_OK (0x04)
   'd'            page CRC32 -> 0x00 + CRC32 big-endian
-  'Q'            code version ("speeduino 202405-dev")
-  'S'            product string ("Speeduino 2024.05-dev")
+  'Q'            code version ("speeduino 202501")
+  'S'            product string ("Speeduino 2025.01")
   'C'            comms test -> 0x00 0xFF
   'f'            capabilities -> proto version + blocking factors (BE16)
 
@@ -46,7 +46,7 @@ import time
 import tty
 import zlib
 
-OCH_OFFSETS = {  # keep in sync with fixtures/speeduino202405_dev.ini
+OCH_OFFSETS = {  # keep in sync with fixtures/speeduino202501_7.ini
     "engine": 2,  # bitfield: 0 running, 1 crank, 3 warmup
     "map": 4,  # U16
     "iat": 6,
@@ -58,11 +58,11 @@ OCH_OFFSETS = {  # keep in sync with fixtures/speeduino202405_dev.ini
     "tps": 25,
 }
 
-# fixtures/speeduino202405_dev.ini pageSize list (pages 1..15).
+# fixtures/speeduino202501_7.ini pageSize list (pages 1..15).
 PAGE_SIZES = [128, 288, 288, 128, 288, 128, 240, 384, 192, 192, 288, 192, 128, 288, 256]
 
-SIGNATURE = b"speeduino 202405-dev"       # 'Q' response, matches INI signature
-PRODUCT_STRING = b"Speeduino 2024.05-dev"  # 'S' response
+SIGNATURE = b"speeduino 202501"       # 'Q' response, matches INI signature
+PRODUCT_STRING = b"Speeduino 2025.01"  # 'S' response
 BLOCKING_FACTOR = 251
 TABLE_BLOCKING_FACTOR = 256
 
@@ -320,8 +320,8 @@ def main():
              "(e.g. a USB adapter cross-wired to the Pi)")
     parser.add_argument("--baud", type=int, default=115200,
                         choices=sorted(BAUD_CONSTANTS), help="baud for --device")
-    parser.add_argument("--och-size", type=int, default=127,
-                        help="och block size, matches fixture ini (default 127)")
+    parser.add_argument("--och-size", type=int, default=130,
+                        help="och block size, matches fixture ini (default 130)")
     parser.add_argument("--duration", type=float, default=0,
                         help="exit after N seconds (default: run until killed)")
     parser.add_argument("--static", action="store_true",
