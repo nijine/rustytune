@@ -500,5 +500,16 @@ fn menus_and_dialogs_golden() {
         DialogItem::Field { label, constant: None, .. } if label.starts_with('#')
     )));
 
+    let io_summary = &def.dialogs["io_summary"];
+    assert!(io_summary.items.iter().any(|item| matches!(
+        item,
+        DialogItem::DisplayOnly {
+            label,
+            constant: Some(constant),
+            enable: Some(_),
+            ..
+        } if label == "fuelPumpPin" && constant == "fuelPumpPin"
+    )));
+
     assert!(def.dialogs["idleSettings"].topic_help.is_some());
 }

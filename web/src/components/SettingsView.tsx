@@ -72,6 +72,32 @@ function ConstantRow({
   );
 }
 
+function DisplayOnlyRow({
+  label,
+  enabled,
+  constant: c,
+}: {
+  label: string;
+  enabled: boolean;
+  constant: ConstantJson;
+}) {
+  const numeric = Number(c.value);
+  const option = Number.isInteger(numeric) ? c.labels[numeric] : undefined;
+  const value = option && option !== "INVALID"
+    ? option
+    : Number.isFinite(numeric)
+      ? numeric.toFixed(c.digits)
+      : String(c.value);
+
+  return (
+    <div className={`dlg-row${enabled ? "" : " disabled"}`}>
+      <span className="dlg-label">{label}</span>
+      <span className="dlg-value">{value}</span>
+      <span className="units">{c.units ?? ""}</span>
+    </div>
+  );
+}
+
 function RequiredFuelRow({
   item,
   onCommit,
@@ -80,6 +106,7 @@ function RequiredFuelRow({
   onCommit: (c: ConstantJson, value: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
   const [displacement, setDisplacement] = useState(() =>
     localStorage.getItem("rustytune-engine-displacement") ?? "1200",
   );
@@ -130,15 +157,29 @@ function RequiredFuelRow({
     onCommit(item.constant, rounded);
     setOpen(false);
   };
+  const commit = (raw: string) => {
+    setDraft(null);
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value === item.constant.value) return;
+    onCommit(item.constant, value);
+  };
 
   return (
     <>
       <div className="dlg-row required-fuel-row">
-        <span className="dlg-label">Calculate required fuel</span>
+        <span className="dlg-label">Required Fuel</span>
         <button type="button" onClick={() => setOpen(true)}>
-          Required Fuel…
+          Calculate…
         </button>
-        <strong>{Number(item.constant.value).toFixed(item.constant.digits)}</strong>
+        <input
+          aria-label="Required Fuel"
+          value={draft ?? Number(item.constant.value).toFixed(item.constant.digits)}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={(event) => commit(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+          }}
+        />
         <span className="units">{item.constant.units ?? "ms"}</span>
       </div>
       {open && (
@@ -223,6 +264,15 @@ function DialogItems({
                 enabled={item.enabled}
                 constant={item.constant}
                 onCommit={onCommit}
+              />
+            );
+          case "displayOnly":
+            return (
+              <DisplayOnlyRow
+                key={`display-${item.constant.name}-${i}`}
+                label={item.label}
+                enabled={item.enabled}
+                constant={item.constant}
               />
             );
           case "requiredFuel":

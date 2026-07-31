@@ -842,7 +842,7 @@ pub fn user_defined(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
                     },
                 );
             }
-            "field" | "slider" | "panel" | "topicHelp" => {
+            "field" | "slider" | "displayOnlyField" | "panel" | "topicHelp" => {
                 if ctx.def.dialogs.last().is_none() {
                     ctx.warn(line.num, format!("`{key}` before any `dialog`"));
                     continue;
@@ -861,6 +861,22 @@ pub fn user_defined(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
                         let enable = conds.next().flatten();
                         let visible = conds.next().flatten();
                         Some(DialogItem::Field {
+                            label,
+                            constant,
+                            enable,
+                            visible,
+                        })
+                    }
+                    "displayOnlyField" => {
+                        let label = str_tok(&tokens, 0, line.num).unwrap_or_default();
+                        let constant = match tokens.get(1) {
+                            Some(Token::Bare(s)) if !s.is_empty() => Some(s.clone()),
+                            _ => None,
+                        };
+                        let mut conds = conditions(&tokens[1..], line.num, ctx).into_iter();
+                        let enable = conds.next().flatten();
+                        let visible = conds.next().flatten();
+                        Some(DialogItem::DisplayOnly {
                             label,
                             constant,
                             enable,
@@ -890,9 +906,9 @@ pub fn user_defined(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
                 }
             }
             // Visual/interactive elements a settings form can't represent.
-            "displayOnlyField" | "commandButton" | "gauge" | "liveGraph" | "graphLine"
-            | "indicator" | "indicatorPanel" | "text" | "settingSelector" | "settingOption"
-            | "radio" | "help" | "webHelp" => {}
+            "commandButton" | "gauge" | "liveGraph" | "graphLine" | "indicator"
+            | "indicatorPanel" | "text" | "settingSelector" | "settingOption" | "radio"
+            | "help" | "webHelp" => {}
             _ => ctx.warn(line.num, format!("unknown [UserDefined] key `{key}`")),
         }
     }

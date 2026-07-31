@@ -206,6 +206,7 @@ export interface MenuJson {
 export type DialogItemJson =
   | { type: "header"; label: string }
   | { type: "constant"; label: string; enabled: boolean; constant: ConstantJson }
+  | { type: "displayOnly"; label: string; enabled: boolean; constant: ConstantJson }
   | {
       type: "requiredFuel";
       constant: ConstantJson;

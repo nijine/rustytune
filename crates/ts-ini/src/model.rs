@@ -308,6 +308,13 @@ pub enum DialogItem {
         /// Hide entirely unless truthy.
         visible: Option<Expr>,
     },
+    /// A read-only constant value, optionally greyed out or hidden.
+    DisplayOnly {
+        label: String,
+        constant: Option<String>,
+        enable: Option<Expr>,
+        visible: Option<Expr>,
+    },
     /// Embedded sub-dialog (or curve/table editor) by name.
     Panel {
         target: String,

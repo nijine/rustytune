@@ -377,6 +377,23 @@ async fn browser_workflow() {
         "idleSettings must embed its sub-panels"
     );
 
+    let io_summary: serde_json::Value = http
+        .get(format!("{base}/tune/dialog/io_summary"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let fuel_pump = io_summary["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "displayOnly" && item["constant"]["name"] == "fuelPumpPin")
+        .expect("I/O Summary must expose the fuel pump pin as read-only");
+    assert_eq!(fuel_pump["label"], "fuelPumpPin");
+    assert!(fuel_pump["enabled"].is_boolean());
+
     // "Crank to run taper" is enable-gated on iacAlgorithm ∈ {2,4,5,7};
     // set the algorithm through the same constants endpoint the form uses
     // and watch the flag flip.
