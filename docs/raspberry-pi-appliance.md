@@ -4,6 +4,15 @@ The regular `rustytune` command remains the desktop application: it listens on
 `127.0.0.1:8642`, opens a browser, connects and logs only when requested, and
 uses `./logs`. No machine configuration or elevated privileges are required.
 
+## Build environment
+
+Prefer building deployment artifacts in Docker when a local Docker engine is
+available. For Raspberry Pi releases, use an ARM64 Debian Bookworm container so
+the resulting binary is compatible with the Pi's glibc version. Build the web
+frontend before the Rust release because `rust-embed` includes `web/dist` in
+the executable. Preflight the resulting binary on the Pi with `ldd` and
+`rustytune --version` before replacing the installed service binary.
+
 ## Install without disturbing the legacy services
 
 1. Build/test the Linux arm64 release and install it as `/usr/local/bin/rustytune`.

@@ -455,6 +455,24 @@ fn menus_and_dialogs_golden() {
             if label == "Idle control type" && c == "iacAlgorithm"
     )));
 
+    // TunerStudio permits a condition without a comma after the constant.
+    // Keep the trigger edge wired to its real constant and condition.
+    let trigger_edge = def.dialogs["triggerSettings"]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            DialogItem::Field {
+                label,
+                constant,
+                enable,
+                ..
+            } if label == "Trigger edge" => Some((constant, enable)),
+            _ => None,
+        })
+        .expect("Trigger edge field");
+    assert_eq!(trigger_edge.0.as_deref(), Some("TrigEdge"));
+    assert!(trigger_edge.1.is_some());
+
     // field = label, name, {}, { visible } keeps the second slot as visible.
     let aux = &def.dialogs["Auxinput_pin_selection"];
     let vis_gated = aux
