@@ -77,6 +77,14 @@ pub fn tokenize(values: &str, num: u32) -> Result<Vec<Token>, Error> {
                 piece.push(c);
             }
             '{' => {
+                // TunerStudio accepts a condition immediately after a value
+                // without a separating comma (`field = "Label", name { x }`).
+                // Treat the expression as a new token when a top-level bare
+                // value has already been accumulated.
+                if brace_depth == 0 && !piece.trim().is_empty() {
+                    push_piece(&mut tokens, &piece, num)?;
+                    piece.clear();
+                }
                 brace_depth += 1;
                 piece.push(c);
             }
@@ -186,6 +194,31 @@ mod tests {
         assert_eq!(
             toks[3],
             Token::Expr("bitStringValue( idleUnits, iacAlgorithm )".into())
+        );
+    }
+
+    #[test]
+    fn splits_trailing_expression_without_comma() {
+        let toks = tokenize(r#""Trigger edge", TrigEdge { TrigPattern != 4 }"#, 1).unwrap();
+        assert_eq!(
+            toks,
+            vec![
+                Token::Str("Trigger edge".into()),
+                Token::Bare("TrigEdge".into()),
+                Token::Expr("TrigPattern != 4".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn expression_after_comma_remains_one_token() {
+        let toks = tokenize(r#"name, { enabled && mode == 1 }"#, 1).unwrap();
+        assert_eq!(
+            toks,
+            vec![
+                Token::Bare("name".into()),
+                Token::Expr("enabled && mode == 1".into()),
+            ]
         );
     }
 
