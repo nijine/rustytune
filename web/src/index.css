@@ -842,16 +842,20 @@ button.burn-needed {
   max-width: 280px;
 }
 
+.dlg-value {
+  min-width: 120px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .dlg-row .units {
   width: 56px;
   color: var(--muted);
   font-size: 0.7rem;
 }
 
-.required-fuel-row strong {
-  min-width: 42px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.required-fuel-row button {
+  white-space: nowrap;
 }
 
 .modal-backdrop {

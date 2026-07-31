@@ -1156,6 +1156,33 @@ fn dialog_items(
                     },
                 }
             }
+            DialogItem::DisplayOnly {
+                label,
+                constant,
+                enable,
+                visible,
+            } => {
+                if !truthy(visible.as_ref(), tune) {
+                    continue;
+                }
+                match constant {
+                    Some(name) => match constant_json(state, tune, name) {
+                        Some(cj) => out.push(serde_json::json!({
+                            "type": "displayOnly",
+                            "label": label,
+                            "enabled": truthy(enable.as_ref(), tune),
+                            "constant": cj,
+                        })),
+                        None => out.push(serde_json::json!({
+                            "type": "unsupported", "label": label, "name": name,
+                        })),
+                    },
+                    None if !label.trim().is_empty() => out.push(serde_json::json!({
+                        "type": "header", "label": label,
+                    })),
+                    None => {}
+                }
+            }
             DialogItem::Panel { target, enable } => {
                 if visited.iter().any(|v| v == target) {
                     continue;
