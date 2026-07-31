@@ -207,6 +207,12 @@ export type DialogItemJson =
   | { type: "header"; label: string }
   | { type: "constant"; label: string; enabled: boolean; constant: ConstantJson }
   | {
+      type: "requiredFuel";
+      constant: ConstantJson;
+      cylinders: number | null;
+      afr: number | null;
+    }
+  | {
       type: "panel";
       name: string;
       title: string;
