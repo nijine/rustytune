@@ -72,6 +72,128 @@ function ConstantRow({
   );
 }
 
+function RequiredFuelRow({
+  item,
+  onCommit,
+}: {
+  item: Extract<DialogItemJson, { type: "requiredFuel" }>;
+  onCommit: (c: ConstantJson, value: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [displacement, setDisplacement] = useState(() =>
+    localStorage.getItem("rustytune-engine-displacement") ?? "1200",
+  );
+  const [injectorFlow, setInjectorFlow] = useState(() =>
+    localStorage.getItem("rustytune-injector-flow") ?? "255",
+  );
+  const [cylinders, setCylinders] = useState(String(Math.round(item.cylinders ?? 4)));
+  const [afr, setAfr] = useState((item.afr ?? 14.7).toFixed(1));
+  const [displacementUnit, setDisplacementUnit] = useState<"cc" | "cid">("cc");
+  const [flowUnit, setFlowUnit] = useState<"cc/min" | "lb/hr">("cc/min");
+
+  const displacementNumber = Number(displacement);
+  const flowNumber = Number(injectorFlow);
+  const cylinderNumber = Number(cylinders);
+  const afrNumber = Number(afr);
+  const displacementCc =
+    displacementUnit === "cc" ? displacementNumber : displacementNumber * 16.387064;
+  const flowCcMin = flowUnit === "cc/min" ? flowNumber : flowNumber * 10.5;
+  // MegaSquirt/TunerStudio's standard-air-density equation simplifies to
+  // this metric form at 100 kPa and 70°F.
+  const calculated =
+    (100 * displacementCc) / (cylinderNumber * afrNumber * flowCcMin);
+  const factor = 10 ** item.constant.digits;
+  const rounded = Math.round(calculated * factor) / factor;
+  const valid =
+    [displacementCc, flowCcMin, cylinderNumber, afrNumber, rounded].every(
+      (value) => Number.isFinite(value) && value > 0,
+    ) &&
+    (item.constant.lo == null || rounded >= item.constant.lo) &&
+    (item.constant.hi == null || rounded <= item.constant.hi);
+
+  const changeDisplacementUnit = (unit: "cc" | "cid") => {
+    if (unit === displacementUnit) return;
+    const converted = unit === "cid" ? displacementNumber / 16.387064 : displacementNumber * 16.387064;
+    setDisplacement(Number.isFinite(converted) ? converted.toFixed(1) : displacement);
+    setDisplacementUnit(unit);
+  };
+  const changeFlowUnit = (unit: "cc/min" | "lb/hr") => {
+    if (unit === flowUnit) return;
+    const converted = unit === "lb/hr" ? flowNumber / 10.5 : flowNumber * 10.5;
+    setInjectorFlow(Number.isFinite(converted) ? converted.toFixed(1) : injectorFlow);
+    setFlowUnit(unit);
+  };
+  const apply = () => {
+    if (!valid) return;
+    localStorage.setItem("rustytune-engine-displacement", String(displacementCc));
+    localStorage.setItem("rustytune-injector-flow", String(flowCcMin));
+    onCommit(item.constant, rounded);
+    setOpen(false);
+  };
+
+  return (
+    <>
+      <div className="dlg-row required-fuel-row">
+        <span className="dlg-label">Calculate required fuel</span>
+        <button type="button" onClick={() => setOpen(true)}>
+          Required Fuel…
+        </button>
+        <strong>{Number(item.constant.value).toFixed(item.constant.digits)}</strong>
+        <span className="units">{item.constant.units ?? "ms"}</span>
+      </div>
+      {open && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setOpen(false)}>
+          <section
+            className="required-fuel-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="required-fuel-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h3 id="required-fuel-title">Required Fuel Calculator</h3>
+            <div className="required-fuel-grid">
+              <label>
+                <span>Engine displacement</span>
+                <input type="number" min="0" step="any" value={displacement} onChange={(e) => setDisplacement(e.target.value)} />
+              </label>
+              <div className="unit-choice">
+                <label><input type="radio" checked={displacementUnit === "cid"} onChange={() => changeDisplacementUnit("cid")} /> CID</label>
+                <label><input type="radio" checked={displacementUnit === "cc"} onChange={() => changeDisplacementUnit("cc")} /> CC</label>
+              </div>
+              <label>
+                <span>Number of cylinders</span>
+                <input type="number" min="1" step="1" value={cylinders} onChange={(e) => setCylinders(e.target.value)} />
+              </label>
+              <div />
+              <label>
+                <span>Injector flow</span>
+                <input type="number" min="0" step="any" value={injectorFlow} onChange={(e) => setInjectorFlow(e.target.value)} />
+              </label>
+              <div className="unit-choice">
+                <label><input type="radio" checked={flowUnit === "lb/hr"} onChange={() => changeFlowUnit("lb/hr")} /> lb/hr</label>
+                <label><input type="radio" checked={flowUnit === "cc/min"} onChange={() => changeFlowUnit("cc/min")} /> cc/min</label>
+              </div>
+              <label>
+                <span>Air-fuel ratio</span>
+                <input type="number" min="0" step="any" value={afr} onChange={(e) => setAfr(e.target.value)} />
+              </label>
+              <div />
+            </div>
+            <p className="required-fuel-result">
+              Calculated required fuel: <strong>{valid ? rounded.toFixed(item.constant.digits) : "—"} ms</strong>
+            </p>
+            {!valid && <p className="error">Enter positive values that produce a result within the ECU’s supported range.</p>}
+            <div className="modal-actions">
+              <button type="button" className="ghost" onClick={() => setOpen(false)}>Cancel</button>
+              <button type="button" className="primary" disabled={!valid} onClick={apply}>Apply</button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
 function DialogItems({
   items,
   onCommit,
@@ -103,6 +225,8 @@ function DialogItems({
                 onCommit={onCommit}
               />
             );
+          case "requiredFuel":
+            return <RequiredFuelRow key={`required-fuel-${i}`} item={item} onCommit={onCommit} />;
           case "panel":
             return (
               <fieldset

@@ -1181,6 +1181,56 @@ fn dialog_items(
                     out.push(serde_json::json!({
                         "type": "table", "name": target, "title": table.title,
                     }));
+                } else if target == "std_injection" {
+                    // TunerStudio supplies this standard dialog internally,
+                    // so it has no [UserDefined] definition for us to parse.
+                    // Expose the core injection constants expected by Engine
+                    // Constants instead of silently dropping the panel.
+                    let mut items = Vec::new();
+                    if let Some(constant) = constant_json(state, tune, "reqFuel") {
+                        let number = |name: &str| match tune.constant_value(name) {
+                            Some(Value::Num(value)) => Some(value),
+                            _ => None,
+                        };
+                        items.push(serde_json::json!({
+                            "type": "requiredFuel",
+                            "constant": constant,
+                            "cylinders": number("nCylinders"),
+                            "afr": number("stoich"),
+                        }));
+                    }
+                    items.extend(
+                        [
+                            ("Control algorithm", "algorithm"),
+                            ("Squirts per engine cycle", "divider"),
+                            ("Injector staging", "alternate"),
+                            ("Engine stroke", "twoStroke"),
+                            ("Number of cylinders", "nCylinders"),
+                            ("Injector port type", "injType"),
+                            ("Number of injectors", "nInjectors"),
+                            ("Engine type", "engineType"),
+                        ]
+                        .into_iter()
+                        .filter_map(|(label, name)| {
+                            constant_json(state, tune, name).map(|constant| {
+                                serde_json::json!({
+                                    "type": "constant",
+                                    "label": label,
+                                    "enabled": true,
+                                    "constant": constant,
+                                })
+                            })
+                        }),
+                    );
+                    if !items.is_empty() {
+                        out.push(serde_json::json!({
+                            "type": "panel",
+                            "name": target,
+                            "title": "Injection",
+                            "enabled": true,
+                            "items": items,
+                        }));
+                    }
                 }
                 // Live graphs and other visual panel targets: skipped.
             }

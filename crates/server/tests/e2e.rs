@@ -421,6 +421,40 @@ async fn browser_workflow() {
         .await
         .unwrap();
     assert_eq!(dialog["title"], "Engine Constants");
+    let injection = dialog["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "panel" && item["name"] == "engine_constants_west")
+        .and_then(|west| west["items"].as_array())
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["type"] == "panel" && item["name"] == "std_injection")
+        })
+        .expect("Engine Constants must include TunerStudio's standard injection panel");
+    let injection_names: Vec<_> = injection["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["constant"]["name"].as_str())
+        .collect();
+    assert!(injection_names.contains(&"reqFuel"));
+    for expected in [
+        "algorithm",
+        "divider",
+        "alternate",
+        "twoStroke",
+        "nCylinders",
+        "injType",
+        "nInjectors",
+        "engineType",
+    ] {
+        assert!(
+            injection_names.contains(&expected),
+            "standard injection panel is missing {expected}"
+        );
+    }
 
     // Wait for the settings writes to flush so later dirty checks are clean.
     let deadline = Instant::now() + Duration::from_secs(5);
