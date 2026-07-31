@@ -100,12 +100,12 @@ The project was originally intended to be cross-platform compatible in a
 similar manner to the TunerStudio software that it was inspired by. However,
 serial communication was originally modeled in a \*nix-only environment,
 and has to be updated to support Windows. This is listed as one of the TODOs
-below.
+in [TODOS.md](TODOS.md).
 
 ## TODOs
 
-- Add Windows build support & matching CI workflow
-- Add autotune functionality
+Known gaps and planned work — including the INI-coverage audit of
+`fixtures/speeduino202501_7.ini` — live in [TODOS.md](TODOS.md).
 
 ## License
 
