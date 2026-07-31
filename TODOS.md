@@ -76,7 +76,7 @@ calibrate, and reset surface, and it depends on `[ControllerCommands]` above.
 
 ## Menu targets that resolve to nothing
 
-22 menu/panel targets resolve to nothing servable. 14 are the `*Map` 3D views
+21 menu/panel targets resolve to nothing servable. 13 are the `*Map` 3D views
 (intentionally unsupported, and documented as such). The remaining 8 are
 real gaps:
 
@@ -106,6 +106,12 @@ behind `#if enablehardware_test`.
 
 ## Bugs
 
+- **Indexed array fields render as unsupported.** 40 active dialog fields use
+  `arrayName[index]` syntax, but the server resolves only exact constant names,
+  so these rows render as disabled dashes even though their backing arrays are
+  parsed: `canoutput_param_group[n]`, `firstTarget[n]`, `secondTarget[n]`,
+  `outputTimeLimit[n]`, and `outputDelay[n]` (8 elements each). Add indexed
+  element lookup and writes to the constant API/dialog model.
 - **TunerStudio label markers render literally.** TS treats a leading `!` as
   critical/red and `#` as a section header; both are passed through verbatim,
   so roughly 20 settings rows read `#Note`, `!This is a critical setting!`,
