@@ -28,7 +28,7 @@ impl FakeEcu {
 
         let child = Command::new("python3")
             .arg(&script)
-            .args(["--mode", mode, "--static", "--och-size", "127"])
+            .args(["--mode", mode, "--static", "--och-size", "130"])
             .args(["--link", link.to_str().unwrap()])
             .args(extra_args)
             .stdout(Stdio::null())
@@ -48,7 +48,7 @@ impl FakeEcu {
     pub fn session(&self, mode: Mode) -> Session<SerialTransport> {
         let transport =
             SerialTransport::open(self.link.to_str().unwrap(), 115_200).expect("open fake ECU pty");
-        Session::new(transport, Config::new(mode, r"r\$tsCanId\x30%2o%2c", 127)).unwrap()
+        Session::new(transport, Config::new(mode, r"r\$tsCanId\x30%2o%2c", 130)).unwrap()
     }
 }
 
@@ -62,7 +62,7 @@ impl Drop for FakeEcu {
 
 #[allow(dead_code)]
 pub fn fixture(symbols: &[&str]) -> IniDef {
-    let src = include_str!("../../../../fixtures/speeduino202405_dev.ini");
+    let src = include_str!("../../../../fixtures/speeduino202501_7.ini");
     let symbols: HashSet<String> = symbols.iter().map(|s| s.to_string()).collect();
     ts_ini::parse_with_symbols(src, &symbols).unwrap()
 }

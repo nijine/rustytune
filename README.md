@@ -89,7 +89,7 @@ the vehicle — only the transport endpoint differs.
 
 ## ECU definitions
 
-`fixtures/speeduino202405_dev.ini` is the reference TunerStudio INI the
+`fixtures/speeduino202501_7.ini` is the reference TunerStudio INI the
 parser is developed and golden-tested against. At runtime the server loads
 the INI matching your firmware, so a firmware update is a new INI file, not
 a code change.

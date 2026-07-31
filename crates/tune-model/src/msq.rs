@@ -607,7 +607,7 @@ mod tests {
         let tune = loaded_tune();
         let saved = save(&tune, &[], "rustytune test", "today");
         let file = parse(&saved).unwrap();
-        assert_eq!(file.signature.as_deref(), Some("speeduino 202405-dev"));
+        assert_eq!(file.signature.as_deref(), Some("speeduino 202501"));
 
         let d = diff(&file, &tune);
         assert!(

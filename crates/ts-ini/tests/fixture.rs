@@ -1,4 +1,4 @@
-//! Golden assertions against the real Speeduino 202405-dev INI.
+//! Golden assertions against the real Speeduino 202501 INI.
 
 use std::collections::HashSet;
 
@@ -7,7 +7,7 @@ use ts_ini::{
     SymbolSource, Value,
 };
 
-const FIXTURE: &str = include_str!("../../../fixtures/speeduino202405_dev.ini");
+const FIXTURE: &str = include_str!("../../../fixtures/speeduino202501_7.ini");
 
 fn parse_default() -> &'static IniDef {
     static DEF: std::sync::OnceLock<IniDef> = std::sync::OnceLock::new();
@@ -46,7 +46,7 @@ fn no_warnings_on_the_fixture() {
 #[test]
 fn megatune_header() {
     let def = parse_default();
-    assert_eq!(def.signature, "speeduino 202405-dev");
+    assert_eq!(def.signature, "speeduino 202501");
     assert_eq!(def.query_command, "Q");
     assert_eq!(def.version_info, "S");
 }
@@ -156,7 +156,7 @@ fn every_constant_fits_its_page() {
 #[test]
 fn output_channels_golden() {
     let def = parse_default();
-    assert_eq!(def.och_block_size, 127);
+    assert_eq!(def.och_block_size, 130);
     assert_eq!(def.och_get_command, r"r\$tsCanId\x30%2o%2c");
 
     let OutputChannel::Scalar {

@@ -23,7 +23,7 @@ if [ ! -f web/dist/index.html ]; then
 fi
 
 python3 tools/fake-ecu/fake_ecu.py \
-    --mode primary --och-size 127 \
+    --mode primary --och-size 130 \
     --link "$LINK" --storage "$STORAGE" "$@" &
 ECU_PID=$!
 printf '%s\n' "$ECU_PID" > "$PID_FILE"
