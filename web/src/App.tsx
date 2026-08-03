@@ -70,6 +70,7 @@ const TABS: [Tab, string][] = [
   ["file", "Tune File"],
   ["logs", "Log Viewer"],
 ];
+const BUILD_SHA = import.meta.env.VITE_BUILD_SHA || "development";
 
 export default function App() {
   const feed = useMemo(() => new TelemetryFeed(), []);
@@ -206,12 +207,15 @@ export default function App() {
           {tab === "logs" && <LogViewer />}
           <footer>
             <span>{definition.signature}</span>
-            {status && status.connected && (
-              <span>
-                {status.frames} frames · {status.crcErrors} CRC ·{" "}
-                {status.timeouts} timeouts
-              </span>
-            )}
+            <span className="footer-meta">
+              {status && status.connected && (
+                <span>
+                  {status.frames} frames · {status.crcErrors} CRC ·{" "}
+                  {status.timeouts} timeouts
+                </span>
+              )}
+              <span>Build {BUILD_SHA}</span>
+            </span>
           </footer>
         </main>
       )}

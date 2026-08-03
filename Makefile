@@ -6,7 +6,7 @@
 all: build
 
 web:
-	cd web && npm install && npm run build
+	cd web && npm install && VITE_BUILD_SHA=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown) npm run build
 
 build: web
 	cargo build --release
