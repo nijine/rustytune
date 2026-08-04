@@ -60,6 +60,9 @@ export default function TableEditor({
   const [table, setTable] = useState<TableJson | null>(null);
   const [sel, setSel] = useState<Sel | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
+  const [adjustMode, setAdjustMode] = useState<"fixed" | "percent">("fixed");
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [pendingCells, setPendingCells] = useState<Record<string, number>>({});
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const dragging = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,6 +80,7 @@ export default function TableEditor({
   useEffect(() => {
     setSel(null);
     setEditText(null);
+    setPendingCells({});
     load();
   }, [load]);
 
@@ -138,14 +142,49 @@ export default function TableEditor({
     post(cells);
   };
 
-  const nudge = (delta: number) => {
+  const nudge = (direction: 1 | -1) => {
     if (!sel) return;
+    const enteredAmount = Number(adjustAmount);
+    const amount =
+      adjustAmount.trim() === ""
+        ? adjustMode === "fixed"
+          ? step
+          : 1
+        : enteredAmount;
+    if (!Number.isFinite(amount) || amount < 0) return;
     const n = norm(sel);
-    const cells = [];
-    for (let r = n.r0; r <= n.r1; r++)
-      for (let c = n.c0; c <= n.c1; c++)
-        cells.push({ row: r, col: c, value: table.z[r][c] + delta });
-    post(cells);
+    setPendingCells((previous) => {
+      const next = { ...previous };
+      for (let r = n.r0; r <= n.r1; r++) {
+        for (let c = n.c0; c <= n.c1; c++) {
+          const key = `${r}:${c}`;
+          const current = previous[key] ?? table.z[r][c];
+          const adjusted =
+            adjustMode === "fixed"
+              ? current + direction * amount
+              : current * (1 + (direction * amount) / 100);
+          const clamped = Math.min(table.zHi, Math.max(table.zLo, adjusted));
+          const raw = Math.round(clamped / table.zScale - table.zTranslate);
+          next[key] = (raw + table.zTranslate) * table.zScale;
+        }
+      }
+      return next;
+    });
+  };
+
+  const applyPending = () => {
+    const cells = Object.entries(pendingCells).map(([key, value]) => {
+      const [row, col] = key.split(":").map(Number);
+      return { row, col, value };
+    });
+    if (cells.length === 0) return;
+    api
+      .setCells(table.id, cells)
+      .then(() => {
+        setPendingCells({});
+        load();
+      })
+      .catch((e: Error) => onError(e.message));
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -157,6 +196,7 @@ export default function TableEditor({
     if (!sel) return;
     const move = (dr: number, dc: number, extend: boolean) => {
       e.preventDefault();
+      setPendingCells({});
       setSel((s) => {
         if (!s) return s;
         const r1 = Math.min(ny - 1, Math.max(0, s.r1 + dr));
@@ -177,11 +217,11 @@ export default function TableEditor({
       case "+":
       case "=":
         e.preventDefault();
-        return nudge(step);
+        return nudge(1);
       case "-":
       case "_":
         e.preventDefault();
-        return nudge(-step);
+        return nudge(-1);
       default:
         if (/^[0-9.]$/.test(e.key)) {
           e.preventDefault();
@@ -221,14 +261,16 @@ export default function TableEditor({
           >
             {rows.map((r) =>
               Array.from({ length: nx }, (_, c) => {
-                const v = table.z[r][c];
+                const key = `${r}:${c}`;
+                const previewing = key in pendingCells;
+                const v = pendingCells[key] ?? table.z[r][c];
                 const [bg, fg] = cellColor(v, zMin, zMax);
                 const selected = inSel(r, c);
                 const active = sel && sel.r1 === r && sel.c1 === c;
                 return (
                   <div
                     key={`${r}-${c}`}
-                    className={`cell ${selected ? "sel" : ""} ${active ? "active" : ""}`}
+                    className={`cell ${selected ? "sel" : ""} ${active ? "active" : ""} ${previewing ? "preview" : ""}`}
                     style={{ background: bg, color: fg }}
                     data-row={r}
                     data-col={c}
@@ -237,6 +279,7 @@ export default function TableEditor({
                       dragging.current = true;
                       containerRef.current?.setPointerCapture?.(e.pointerId);
                       setEditText(null);
+                      setPendingCells({});
                       setSel({ r0: r, c0: c, r1: r, c1: c });
                       containerRef.current?.focus();
                     }}
@@ -281,8 +324,54 @@ export default function TableEditor({
           <div className="axis-label">{table.xLabel ?? ""}</div>
         </div>
       </div>
+      <div
+        className="table-adjust"
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <span>Adjust selected by</span>
+        <input
+          type="number"
+          min="0"
+          step="any"
+          value={adjustAmount}
+          placeholder={adjustMode === "fixed" ? String(step) : "1"}
+          aria-label="Adjustment amount"
+          onChange={(e) => setAdjustAmount(e.target.value)}
+        />
+        <select
+          value={adjustMode}
+          aria-label="Adjustment mode"
+          onChange={(e) =>
+            setAdjustMode(e.target.value as "fixed" | "percent")
+          }
+        >
+          <option value="fixed">fixed value</option>
+          <option value="percent">percent</option>
+        </select>
+        <button type="button" disabled={!sel} onClick={() => nudge(-1)}>
+          −
+        </button>
+        <button type="button" disabled={!sel} onClick={() => nudge(1)}>
+          +
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={Object.keys(pendingCells).length === 0}
+          onClick={applyPending}
+        >
+          Apply preview
+        </button>
+        <button
+          type="button"
+          disabled={Object.keys(pendingCells).length === 0}
+          onClick={() => setPendingCells({})}
+        >
+          Cancel
+        </button>
+      </div>
       <p className="hint muted">
-        drag to select · type a value + Enter · +/− to nudge · arrows to move
+        drag to select · type a value + Enter · +/− to preview an adjustment · Apply preview to write
       </p>
     </div>
   );

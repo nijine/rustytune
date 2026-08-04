@@ -60,6 +60,8 @@ pub struct TableData {
     pub z_lo: f64,
     pub z_hi: f64,
     pub z_digits: u8,
+    pub z_scale: f64,
+    pub z_translate: f64,
 }
 
 pub struct Tune {
@@ -516,6 +518,8 @@ impl Tune {
             .as_ref()
             .and_then(|d| d.eval(self).ok())
             .unwrap_or(0.0) as u8;
+        let z_scale = z_def.scale.eval(self).unwrap_or(1.0);
+        let z_translate = z_def.translate.eval(self).unwrap_or(0.0);
         Some(TableData {
             x,
             y,
@@ -523,6 +527,8 @@ impl Tune {
             z_lo,
             z_hi,
             z_digits,
+            z_scale,
+            z_translate,
         })
     }
 

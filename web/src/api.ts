@@ -118,6 +118,8 @@ export interface TableJson {
   zLo: number;
   zHi: number;
   zDigits: number;
+  zScale: number;
+  zTranslate: number;
   xLabel: string | null;
   yLabel: string | null;
   xChannel: string | null;
