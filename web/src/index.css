@@ -473,6 +473,10 @@ button.burn-needed {
   outline-offset: -2px;
 }
 
+.cell.preview {
+  box-shadow: inset 0 0 0 2px var(--warning);
+}
+
 .cell-edit {
   width: 100%;
   height: 100%;
@@ -514,6 +518,34 @@ button.burn-needed {
   color: var(--muted);
   font-size: 0.65rem;
   padding-top: 2px;
+}
+
+.table-adjust {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 0.75rem;
+  color: var(--secondary);
+  user-select: text;
+}
+
+.table-adjust input {
+  width: 78px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-adjust button:not(.primary) {
+  width: 34px;
+  padding-inline: 0;
+  font-weight: 600;
+}
+
+.table-adjust button:nth-last-child(-n + 2) {
+  width: auto;
+  padding-inline: 10px;
 }
 
 .hint {
