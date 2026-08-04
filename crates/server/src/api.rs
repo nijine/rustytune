@@ -698,6 +698,18 @@ struct TableJson {
     y_label: Option<String>,
     x_channel: Option<String>,
     y_channel: Option<String>,
+    x_meta: Option<TableAxisJson>,
+    y_meta: Option<TableAxisJson>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TableAxisJson {
+    lo: Option<f64>,
+    hi: Option<f64>,
+    digits: u8,
+    scale: f64,
+    translate: f64,
 }
 
 pub async fn tune_table(State(state): State<SharedState>, Path(id): Path<String>) -> Response {
@@ -715,6 +727,13 @@ pub async fn tune_table(State(state): State<SharedState>, Path(id): Path<String>
         )
         .into_response();
     };
+    let axis_json = |meta: tune_model::AxisMeta| TableAxisJson {
+        lo: meta.lo,
+        hi: meta.hi,
+        digits: meta.digits,
+        scale: meta.scale,
+        translate: meta.translate,
+    };
     Json(TableJson {
         id: id.clone(),
         title: def.title.clone(),
@@ -730,8 +749,39 @@ pub async fn tune_table(State(state): State<SharedState>, Path(id): Path<String>
         y_label: def.xy_labels.get(1).cloned(),
         x_channel: def.x_bins.1.clone(),
         y_channel: def.y_bins.1.clone(),
+        x_meta: data.x_meta.map(axis_json),
+        y_meta: data.y_meta.map(axis_json),
     })
     .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct TableAxisEdit {
+    pub axis: String,
+    pub index: usize,
+    pub value: f64,
+}
+
+pub async fn tune_table_axis(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(edit): Json<TableAxisEdit>,
+) -> Response {
+    if let Err(e) = acquire_writer(&state, &headers) {
+        return e.into_response();
+    }
+    {
+        let mut tune = state.tune.lock().unwrap();
+        if !tune.loaded() {
+            return err(StatusCode::CONFLICT, "tune not loaded").into_response();
+        }
+        if let Err(e) = tune.set_table_axis(&id, &edit.axis, edit.index, edit.value) {
+            return err(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+        }
+    }
+    broadcast_tune(&state);
+    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 #[derive(Deserialize)]

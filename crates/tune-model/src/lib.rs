@@ -62,6 +62,18 @@ pub struct TableData {
     pub z_digits: u8,
     pub z_scale: f64,
     pub z_translate: f64,
+    pub x_meta: Option<AxisMeta>,
+    pub y_meta: Option<AxisMeta>,
+}
+
+/// Encoding and edit limits for a table axis defined by xBins/yBins.
+#[derive(Debug, Clone)]
+pub struct AxisMeta {
+    pub lo: Option<f64>,
+    pub hi: Option<f64>,
+    pub digits: u8,
+    pub scale: f64,
+    pub translate: f64,
 }
 
 pub struct Tune {
@@ -520,6 +532,30 @@ impl Tune {
             .unwrap_or(0.0) as u8;
         let z_scale = z_def.scale.eval(self).unwrap_or(1.0);
         let z_translate = z_def.translate.eval(self).unwrap_or(0.0);
+        let axis_meta = |name: &str, expected_len: usize| {
+            let c = self.constant(name)?;
+            if c.class != ConstantClass::Array
+                || c.shape?.element_count() as usize != expected_len
+                || self.location(c).is_none()
+            {
+                return None;
+            }
+            let scale = c.scale.eval(self).ok()?;
+            if !scale.is_finite() || scale == 0.0 {
+                return None;
+            }
+            Some(AxisMeta {
+                lo: c.lo.as_ref().and_then(|v| v.eval(self).ok()),
+                hi: c.hi.as_ref().and_then(|v| v.eval(self).ok()),
+                digits: c
+                    .digits
+                    .as_ref()
+                    .and_then(|v| v.eval(self).ok())
+                    .unwrap_or(0.0) as u8,
+                scale,
+                translate: c.translate.eval(self).ok()?,
+            })
+        };
         Some(TableData {
             x,
             y,
@@ -529,7 +565,28 @@ impl Tune {
             z_digits,
             z_scale,
             z_translate,
+            x_meta: axis_meta(&table.x_bins.0, nx),
+            y_meta: axis_meta(&table.y_bins.0, ny),
         })
+    }
+
+    /// Set one xBins or yBins value when the INI resolves it to an array.
+    pub fn set_table_axis(
+        &mut self,
+        id: &str,
+        axis: &str,
+        index: usize,
+        value: f64,
+    ) -> Result<(), TuneError> {
+        let table = self
+            .table_def(id)
+            .ok_or_else(|| TuneError::UnknownTable(id.into()))?;
+        let name = match axis {
+            "x" => table.x_bins.0.clone(),
+            "y" => table.y_bins.0.clone(),
+            _ => return Err(TuneError::NotEditable(axis.into(), "axis must be x or y")),
+        };
+        self.set_array_element(&name, index, value)
     }
 
     /// Set one z cell (row indexes y, col indexes x).
@@ -702,6 +759,20 @@ mod tests {
         let spans = tune.dirty_spans(1, 4);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0], (3 * 16 + 5, vec![87]));
+    }
+
+    #[test]
+    fn table_axes_follow_ini_bin_constants() {
+        let mut tune = loaded_tune();
+        let before = tune.table("veTable1Tbl").unwrap();
+        assert!(before.x_meta.is_some());
+        assert!(before.y_meta.is_some());
+
+        // rpmBins is an INI-declared U08 array with scale 100, so the edit
+        // is stored at the closest representable ECU value.
+        tune.set_table_axis("veTable1Tbl", "x", 0, 1234.0).unwrap();
+        assert_eq!(tune.table("veTable1Tbl").unwrap().x[0], 1200.0);
+        assert!(tune.set_table_axis("veTable1Tbl", "z", 0, 1.0).is_err());
     }
 
     #[test]
