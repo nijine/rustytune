@@ -6,7 +6,7 @@
 // grid refetches so clamping/raw rounding is always reflected.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type TableJson } from "../api";
+import { api, type TableAxisMeta, type TableJson } from "../api";
 import type { TelemetryFeed } from "../feed";
 
 interface Sel {
@@ -14,6 +14,18 @@ interface Sel {
   c0: number;
   r1: number;
   c1: number;
+}
+
+interface AxisEdit {
+  axis: "x" | "y";
+  index: number;
+  text: string;
+}
+
+function encodedValue(value: number, meta: TableAxisMeta): number {
+  const clamped = Math.min(meta.hi ?? Infinity, Math.max(meta.lo ?? -Infinity, value));
+  const raw = Math.round(clamped / meta.scale - meta.translate);
+  return (raw + meta.translate) * meta.scale;
 }
 
 /** Heatmap: dark→light blue over the table's own value range. */
@@ -63,6 +75,7 @@ export default function TableEditor({
   const [adjustMode, setAdjustMode] = useState<"fixed" | "percent">("fixed");
   const [adjustAmount, setAdjustAmount] = useState("");
   const [pendingCells, setPendingCells] = useState<Record<string, number>>({});
+  const [axisEdit, setAxisEdit] = useState<AxisEdit | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const dragging = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -81,6 +94,7 @@ export default function TableEditor({
     setSel(null);
     setEditText(null);
     setPendingCells({});
+    setAxisEdit(null);
     load();
   }, [load]);
 
@@ -187,6 +201,31 @@ export default function TableEditor({
       .catch((e: Error) => onError(e.message));
   };
 
+  const axisPreview = axisEdit
+    ? (() => {
+        const value = Number(axisEdit.text);
+        const meta = axisEdit.axis === "x" ? table.xMeta : table.yMeta;
+        return meta && Number.isFinite(value) ? encodedValue(value, meta) : null;
+      })()
+    : null;
+
+  const applyAxisEdit = () => {
+    if (!axisEdit || axisPreview === null) return;
+    api
+      .setTableAxis(table.id, axisEdit.axis, axisEdit.index, axisPreview)
+      .then(() => {
+        setAxisEdit(null);
+        load();
+      })
+      .catch((e: Error) => onError(e.message));
+  };
+
+  const editAxis = (axis: "x" | "y", index: number, value: number) => {
+    const meta = axis === "x" ? table.xMeta : table.yMeta;
+    if (!meta) return;
+    setAxisEdit({ axis, index, text: value.toFixed(meta.digits) });
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (editText !== null) {
       if (e.key === "Enter") commitEdit();
@@ -250,7 +289,16 @@ export default function TableEditor({
       <div className="table-flex">
         <div className="ylabels">
           {rows.map((r) => (
-            <div key={r}>{table.y[r]?.toFixed(0)}</div>
+            <button
+              type="button"
+              key={r}
+              className={table.yMeta ? "axis-bin editable" : "axis-bin"}
+              disabled={!table.yMeta}
+              title={table.yMeta ? "Edit Y-axis bin" : "This INI axis is not editable"}
+              onClick={() => editAxis("y", r, table.y[r])}
+            >
+              {table.y[r]?.toFixed(table.yMeta?.digits ?? 0)}
+            </button>
           ))}
           <div className="corner">{table.yLabel ?? ""}</div>
         </div>
@@ -314,16 +362,50 @@ export default function TableEditor({
             style={{ gridTemplateColumns: `repeat(${nx}, 1fr)` }}
           >
             {Array.from({ length: nx }, (_, c) => (
-              <div key={c}>
+              <button
+                type="button"
+                key={c}
+                className={table.xMeta ? "axis-bin editable" : "axis-bin"}
+                disabled={!table.xMeta}
+                title={table.xMeta ? "Edit X-axis bin" : "This INI axis is not editable"}
+                onClick={() => editAxis("x", c, table.x[c])}
+              >
                 {table.x[c] >= 1000
                   ? `${(table.x[c] / 1000).toFixed(1)}k`
-                  : table.x[c]?.toFixed(0)}
-              </div>
+                  : table.x[c]?.toFixed(table.xMeta?.digits ?? 0)}
+              </button>
             ))}
           </div>
           <div className="axis-label">{table.xLabel ?? ""}</div>
         </div>
       </div>
+      {axisEdit && (
+        <div className="axis-edit" onKeyDown={(e) => e.stopPropagation()}>
+          <label>
+            {axisEdit.axis.toUpperCase()} axis bin {axisEdit.index + 1}
+            <input
+              autoFocus
+              type="number"
+              step="any"
+              value={axisEdit.text}
+              onChange={(e) => setAxisEdit({ ...axisEdit, text: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") applyAxisEdit();
+                if (e.key === "Escape") setAxisEdit(null);
+              }}
+            />
+          </label>
+          <span className="muted">
+            ECU value: {axisPreview === null ? "—" : axisPreview.toFixed(
+              (axisEdit.axis === "x" ? table.xMeta : table.yMeta)?.digits ?? 0,
+            )}
+          </span>
+          <button type="button" className="primary" disabled={axisPreview === null} onClick={applyAxisEdit}>
+            Apply
+          </button>
+          <button type="button" onClick={() => setAxisEdit(null)}>Cancel</button>
+        </div>
+      )}
       <div
         className="table-adjust"
         onKeyDown={(e) => e.stopPropagation()}
@@ -371,7 +453,7 @@ export default function TableEditor({
         </button>
       </div>
       <p className="hint muted">
-        drag to select · type a value + Enter · +/− to preview an adjustment · Apply preview to write
+        click an axis value to edit it · drag cells to select · +/− to preview an adjustment
       </p>
     </div>
   );

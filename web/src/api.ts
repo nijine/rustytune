@@ -124,6 +124,16 @@ export interface TableJson {
   yLabel: string | null;
   xChannel: string | null;
   yChannel: string | null;
+  xMeta: TableAxisMeta | null;
+  yMeta: TableAxisMeta | null;
+}
+
+export interface TableAxisMeta {
+  lo: number | null;
+  hi: number | null;
+  digits: number;
+  scale: number;
+  translate: number;
 }
 
 export interface CurveJson {
@@ -354,6 +364,8 @@ export const api = {
   table: (id: string) => request<TableJson>(`/api/tune/table/${id}`),
   setCells: (id: string, cells: { row: number; col: number; value: number }[]) =>
     post(`/api/tune/table/${id}/cells`, { cells }),
+  setTableAxis: (id: string, axis: "x" | "y", index: number, value: number) =>
+    post(`/api/tune/table/${id}/axis`, { axis, index, value }),
   constants: (names: string[]) =>
     request<ConstantJson[]>(`/api/tune/constants?names=${names.join(",")}`),
   setConstant: (name: string, value: number) =>

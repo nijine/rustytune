@@ -427,7 +427,8 @@ button.burn-needed {
   font-variant-numeric: tabular-nums;
 }
 
-.ylabels > div {
+.ylabels > div,
+.ylabels > .axis-bin {
   flex: 1;
   display: flex;
   align-items: center;
@@ -518,6 +519,48 @@ button.burn-needed {
   color: var(--muted);
   font-size: 0.65rem;
   padding-top: 2px;
+}
+
+.axis-bin {
+  appearance: none;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0 2px;
+  min-width: 0;
+}
+
+.axis-bin:disabled {
+  opacity: 1;
+}
+
+.axis-bin.editable {
+  cursor: pointer;
+}
+
+.axis-bin.editable:hover,
+.axis-bin.editable:focus-visible {
+  background: var(--surface);
+  outline: 1px solid var(--accent);
+}
+
+.axis-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.axis-edit label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.axis-edit input {
+  width: 7rem;
 }
 
 .table-adjust {
