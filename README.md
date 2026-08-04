@@ -26,7 +26,8 @@ then save it back out.
 
 `make release` builds a single-file binary tarball for this machine;
 tagging `v*` builds macOS arm64 + Linux x86_64/arm64 release artifacts in
-CI (Linux arm64 covers the Raspberry Pi).
+CI (Linux arm64 covers the Raspberry Pi). Both local and tagged release builds
+display their source commit's short Git SHA in the web interface footer.
 
 ## Deployment profiles
 

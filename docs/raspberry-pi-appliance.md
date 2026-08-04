@@ -13,6 +13,19 @@ frontend before the Rust release because `rust-embed` includes `web/dist` in
 the executable. Preflight the resulting binary on the Pi with `ldd` and
 `rustytune --version` before replacing the installed service binary.
 
+For an already-provisioned appliance, build and deploy in one command:
+
+```sh
+tools/deploy-pi.sh pi@rustytune.local
+```
+
+This builds the frontend and Rust server in a Debian Bookworm Linux ARM64
+Docker image, uploads the resulting binary over SSH, runs the preflight checks,
+and restarts `rustytune.service`. The remote user needs sudo access. If the new
+service does not become active, the script restores the previous binary and
+restarts it. The script updates only the application binary; initial user,
+configuration, and systemd-unit provisioning still follow the steps below.
+
 ## Install without disturbing the legacy services
 
 1. Build/test the Linux arm64 release and install it as `/usr/local/bin/rustytune`.

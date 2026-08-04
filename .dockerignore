@@ -1,0 +1,8 @@
+.git
+target
+dist
+tmp
+logs
+web/node_modules
+web/dist
+*.msl

@@ -338,6 +338,13 @@ footer {
   font-variant-numeric: tabular-nums;
 }
 
+.footer-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* Tabs */
 .tabs {
   display: flex;

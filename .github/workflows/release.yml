@@ -36,7 +36,7 @@ jobs:
         working-directory: web
         run: |
           npm ci
-          npm run build
+          VITE_BUILD_SHA="$(git rev-parse --short HEAD)" npm run build
 
       - uses: dtolnay/rust-toolchain@stable
 
