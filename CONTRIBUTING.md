@@ -5,15 +5,10 @@ coherent — please read this before opening a pull request.
 
 ## License of contributions (inbound = outbound)
 
-rustytune is licensed under **GPL-3.0-or-later with the App Store
-additional permission** described in `LICENSE-EXCEPTION.md`. By
+rustytune is licensed under the standard **GPL-3.0-or-later**. By
 submitting a contribution you agree that it is licensed under those
-same terms — the GPL *including* the additional permission. There is
-no CLA and no copyright assignment; you keep your copyright.
-
-Contributions offered under plain GPL without the additional
-permission can't be merged, since they would strip the project's
-ability to ship app-store builds.
+same terms. There is no CLA and no copyright assignment; you keep your
+copyright.
 
 ## Developer Certificate of Origin
 

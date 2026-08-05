@@ -110,15 +110,17 @@ Known gaps and planned work — including the INI-coverage audit of
 
 ## License
 
-rustytune is free software: **GPL-3.0-or-later**, with one addition —
-an [App Store additional permission](LICENSE-EXCEPTION.md) (GPLv3 §7)
-that allows conveying builds through app stores whose terms would
-otherwise conflict with the GPL, as long as full source stays publicly
-available under this same license. See [LICENSE](LICENSE) and
-[LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md).
+rustytune is free software licensed under the standard
+**GNU General Public License version 3 or later (GPL-3.0-or-later)**.
+See [LICENSE](LICENSE) for the full license text.
 
-Contributions are accepted under the same terms with a DCO sign-off —
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are accepted under the same terms — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+This was originally licensed with a section 7 exemption for potential
+App Store publishing, but in the spirit of everything that Speeduino
+has done for the community, I've decided to remove the exemption and
+hold it to standard GPLv3 licensing, ensuring that it stays freely
+available.
 
 The reference INI in `fixtures/` originates from the
 [Speeduino](https://speeduino.com) project and remains under
