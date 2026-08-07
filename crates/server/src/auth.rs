@@ -20,6 +20,7 @@ pub struct AuthState {
     store: PathBuf,
     approved: Mutex<HashSet<String>>,
     pairing: Mutex<Option<PairingCode>>,
+    master_pin_hash: Option<String>,
 }
 struct PairingCode {
     hash: String,
@@ -27,7 +28,7 @@ struct PairingCode {
 }
 
 impl AuthState {
-    pub fn new(required: bool, state_dir: PathBuf) -> Self {
+    pub fn new(required: bool, state_dir: PathBuf, master_pin: Option<&str>) -> Self {
         let store = state_dir.join("approved-devices");
         let approved = std::fs::read_to_string(&store)
             .ok()
@@ -38,6 +39,7 @@ impl AuthState {
             store,
             approved: Mutex::new(approved),
             pairing: Mutex::new(None),
+            master_pin_hash: master_pin.map(hash),
         }
     }
     pub fn open_pairing(&self) -> Result<PairingInfo, String> {
@@ -53,13 +55,17 @@ impl AuthState {
     }
     fn approve(&self, code: &str) -> Result<String, &'static str> {
         let mut window = self.pairing.lock().unwrap();
-        let valid = window
+        let code_hash = hash(code);
+        let one_time_valid = window
             .as_ref()
-            .is_some_and(|p| p.expires > Instant::now() && p.hash == hash(code));
-        if !valid {
+            .is_some_and(|p| p.expires > Instant::now() && p.hash == code_hash);
+        let master_valid = self.master_pin_hash.as_ref() == Some(&code_hash);
+        if !one_time_valid && !master_valid {
             return Err("pairing code is invalid or expired");
         }
-        *window = None;
+        if one_time_valid {
+            *window = None;
+        }
         let token: String = (0..32)
             .map(|_| format!("{:02x}", rand::random::<u8>()))
             .collect();
@@ -121,7 +127,9 @@ pub async fn pair(
         Ok(token) => (
             [(
                 header::SET_COOKIE,
-                format!("rustytune_session={token}; Path=/; HttpOnly; SameSite=Strict"),
+                format!(
+                    "rustytune_session={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict"
+                ),
             )],
             Json(serde_json::json!({"paired":true})),
         )
