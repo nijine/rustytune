@@ -58,6 +58,22 @@ migration deliberately leaves them intact.
 Pairing controls application access over HTTP; it does not encrypt traffic.
 Use a trusted vehicle LAN. HTTPS is outside the current deployment profile.
 
+Approved browsers receive a one-year device cookie. Mobile or private-browser
+windows may still discard cookies when closed. For those
+browsers, an optional reusable six-digit code can be set in
+`/etc/rustytune/rustytune.toml` and activated by restarting RustyTune:
+
+```toml
+[authentication]
+required = true
+state_directory = "/var/lib/rustytune"
+master_pin = "482731" # replace with your own six digits
+```
+
+Use exactly six numeric digits, keep the configuration file root-readable only,
+and treat this PIN as a shared password. The temporary code shown by **Pair
+Device** continues to work and is safer for ordinary device enrollment.
+
 ## Engine-off shutdown
 
 The `[engine_shutdown]` section is disabled by default. When enabled, the

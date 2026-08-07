@@ -64,7 +64,7 @@ pub fn build_state_with_symbols(
         symbols,
         log_dir,
         runtime: Arc::new(config::RuntimeConfig::desktop()),
-        auth: Arc::new(auth::AuthState::new(false, ".".into())),
+        auth: Arc::new(auth::AuthState::new(false, ".".into(), None)),
     })
 }
 
@@ -90,6 +90,7 @@ pub fn build_state_with_runtime(
     owned.auth = Arc::new(auth::AuthState::new(
         runtime.authentication.required,
         runtime.authentication.state_directory.clone(),
+        runtime.authentication.master_pin.as_deref(),
     ));
     owned.runtime = Arc::new(runtime);
     Arc::new(owned)

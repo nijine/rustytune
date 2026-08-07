@@ -25,6 +25,5 @@ delay_seconds = 15
 [authentication]
 required = true
 state_directory = "/var/lib/rustytune"
-
-[captive_portal]
-enabled = true
+# Optional reusable fallback for browsers that discard local-site cookies.
+# Choose your own six digits and protect this file: master_pin = "123456"

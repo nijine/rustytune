@@ -79,9 +79,6 @@ export interface RuntimeConfig {
     required: boolean;
     state_directory: string;
   };
-  captive_portal: {
-    enabled: boolean;
-  };
 }
 
 export interface Frame {

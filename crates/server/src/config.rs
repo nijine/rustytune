@@ -21,7 +21,6 @@ pub struct RuntimeConfig {
     pub logging: LoggingConfig,
     pub engine_shutdown: EngineShutdownConfig,
     pub authentication: AuthenticationConfig,
-    pub captive_portal: CaptivePortalConfig,
     #[serde(skip)]
     pub source_path: Option<PathBuf>,
 }
@@ -64,13 +63,8 @@ pub struct EngineShutdownConfig {
 pub struct AuthenticationConfig {
     pub required: bool,
     pub state_directory: PathBuf,
+    pub master_pin: Option<String>,
 }
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CaptivePortalConfig {
-    pub enabled: bool,
-}
-
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self::desktop()
@@ -84,7 +78,6 @@ impl RuntimeConfig {
             logging: LoggingConfig::default(),
             engine_shutdown: EngineShutdownConfig::default(),
             authentication: AuthenticationConfig::default(),
-            captive_portal: CaptivePortalConfig::default(),
             source_path: None,
         }
     }
@@ -110,8 +103,8 @@ impl RuntimeConfig {
             authentication: AuthenticationConfig {
                 required: true,
                 state_directory: "/var/lib/rustytune".into(),
+                master_pin: None,
             },
-            captive_portal: CaptivePortalConfig { enabled: true },
             source_path: None,
         }
     }
@@ -135,6 +128,14 @@ impl RuntimeConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .authentication
+            .master_pin
+            .as_ref()
+            .is_some_and(|pin| pin.len() != 6 || !pin.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return Err("authentication.master_pin must contain exactly six digits".into());
+        }
         let cfg = &self.engine_shutdown;
         if !cfg.stop_rpm.is_finite() || cfg.stop_rpm < 0.0 {
             return Err("engine_shutdown.stop_rpm must be a finite non-negative number".into());
@@ -208,6 +209,7 @@ impl Default for AuthenticationConfig {
         Self {
             required: false,
             state_directory: ".".into(),
+            master_pin: None,
         }
     }
 }
@@ -235,6 +237,15 @@ mod tests {
         assert!(cfg.validate().is_err());
         cfg.engine_shutdown.arm_rpm = 500.0;
         cfg.engine_shutdown.delay_seconds = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn master_pin_is_six_digits() {
+        let mut cfg = RuntimeConfig::appliance();
+        cfg.authentication.master_pin = Some("123456".into());
+        assert!(cfg.validate().is_ok());
+        cfg.authentication.master_pin = Some("12345x".into());
         assert!(cfg.validate().is_err());
     }
 }
