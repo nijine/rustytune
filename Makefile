@@ -1,7 +1,7 @@
 # rust-embed bakes web/dist into the server binary, so the web build must
 # run before any cargo build that should serve a real page.
 
-.PHONY: all web build run bench dev test fmt clean release oled oled-check appliance-check
+.PHONY: all web build run desktop-run desktop-build bench dev test fmt clean release oled oled-check appliance-check
 
 all: build
 
@@ -13,6 +13,19 @@ build: web
 
 run: web
 	cargo run -p rustytune-server
+
+# Native shell around the same embedded frontend and in-process server.
+# Install the Tauri CLI first: cargo install tauri-cli --version '^2.0.0' --locked
+desktop-run: web
+	cargo run -p rustytune-desktop
+
+desktop-build: web
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		cd crates/desktop && cargo tauri build --bundles app; \
+		cd ../.. && tools/package-macos-dmg.sh; \
+	else \
+		cd crates/desktop && cargo tauri build; \
+	fi
 
 # Hardware-free test bench: fake Speeduino on a pty + the server against it.
 bench:

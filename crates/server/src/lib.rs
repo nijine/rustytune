@@ -11,6 +11,7 @@ pub mod definition;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::{future::Future, io};
 
 use axum::{
     Router,
@@ -68,6 +69,16 @@ pub fn build_state_with_symbols(
 }
 
 pub fn build_appliance_state(
+    def: ts_ini::IniDef,
+    symbols: Vec<String>,
+    runtime: config::RuntimeConfig,
+) -> SharedState {
+    build_state_with_runtime(def, symbols, runtime)
+}
+
+/// Build state with an explicit runtime profile. Native shells use this to
+/// record their resolved data directory and ephemeral listener configuration.
+pub fn build_state_with_runtime(
     def: ts_ini::IniDef,
     symbols: Vec<String>,
     runtime: config::RuntimeConfig,
@@ -170,6 +181,34 @@ pub fn spawn_auto_connect(state: SharedState) {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
+}
+
+/// Serve the application on an already-bound listener and shut down all ECU
+/// communication once the HTTP server stops. Both the CLI and native desktop
+/// shell use this entry point so serial and datalog cleanup cannot diverge.
+pub async fn serve_with_shutdown<F>(
+    listener: tokio::net::TcpListener,
+    state: SharedState,
+    shutdown: F,
+) -> io::Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let result = axum::serve(listener, app(state.clone()))
+        .with_graceful_shutdown(shutdown)
+        .await;
+    shutdown_comms(&state);
+    result
+}
+
+/// Stop and join the communication thread. Taking the handle makes repeated
+/// cleanup requests harmless and guarantees an active datalog is flushed once.
+pub fn shutdown_comms(state: &SharedState) {
+    let handle = state.comms.lock().unwrap().take();
+    if let Some(handle) = handle {
+        let _ = handle.cmd_tx.send(comms::Cmd::Shutdown);
+        let _ = handle.join.join();
+    }
 }
 
 /// Serve the embedded frontend; unknown extensionless paths fall back to

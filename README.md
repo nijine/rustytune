@@ -49,6 +49,7 @@ to verify the RustyTune server and OLED companion together.
 | `tune-model` | Page buffers, typed constant/table views, dirty tracking, `.msq` I/O |
 | `datalog` | MegaLogViewer `.msl` writing/reading |
 | `server` | axum server: comms thread, REST + WebSocket API, embedded web UI |
+| `desktop` | Tauri shell: native window around an in-process server |
 
 The frontend (`web/`, Vite + React + TypeScript) is built to `web/dist` and
 embedded into the server binary — a release build is a single executable.
@@ -59,10 +60,30 @@ Requires Rust (stable) and Node ≥ 22.
 
 ```sh
 make run        # build frontend, then cargo run (opens the browser)
+make desktop-run # build and run the native Tauri desktop app
 make test       # fmt check + clippy + tests
 make dev        # Vite dev server with HMR (run the server separately)
 make bench      # hardware-free test bench (see below)
 ```
+
+The native desktop build uses Tauri 2 and keeps the browser/server build
+available alongside it. Install the bundler with
+`cargo install tauri-cli --version '^2.0.0' --locked`, then run
+`make desktop-build` to produce the platform bundle. On Debian/Ubuntu,
+desktop development additionally requires:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+On macOS, the bundle target creates the DMG directly with `hdiutil`, avoiding
+Finder/AppleScript automation while retaining the app and Applications
+shortcut. Other platforms use Tauri's normal bundler.
+
+Desktop datalogs are stored below the OS-specific RustyTune application-data
+directory. The native app currently targets macOS arm64 and Linux x86_64;
+Windows remains blocked on the serial transport work described below.
 
 ## Test bench — no vehicle required
 

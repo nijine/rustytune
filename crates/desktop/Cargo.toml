@@ -1,0 +1,20 @@
+[package]
+name = "rustytune-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native Tauri shell for rustytune"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rustytune-server = { path = "../server" }
+ts-ini = { path = "../ts-ini" }
+
+open = "5"
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tokio = { version = "1", features = ["net", "sync", "time"] }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

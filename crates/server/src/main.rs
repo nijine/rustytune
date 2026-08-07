@@ -127,7 +127,6 @@ async fn main() -> std::io::Result<()> {
             runtime.logging.directory.clone(),
         )
     };
-    let app = rustytune_server::app(state.clone());
     rustytune_server::spawn_auto_connect(state.clone());
     if let Some(path) = runtime.server.admin_socket.clone() {
         rustytune_server::admin::spawn(state.clone(), path)?;
@@ -144,17 +143,7 @@ async fn main() -> std::io::Result<()> {
         tracing::warn!("could not open browser: {err}");
     }
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-
-    // Stop the comms thread so an in-flight .msl log is flushed and the
-    // serial port closes before the process exits.
-    let handle = state.comms.lock().unwrap().take();
-    if let Some(handle) = handle {
-        let _ = handle.cmd_tx.send(rustytune_server::comms::Cmd::Shutdown);
-        let _ = handle.join.join();
-    }
+    rustytune_server::serve_with_shutdown(listener, state, shutdown_signal()).await?;
     tracing::info!("bye");
     Ok(())
 }

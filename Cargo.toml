@@ -6,6 +6,7 @@ members = [
     "crates/tune-model",
     "crates/datalog",
     "crates/server",
+    "crates/desktop",
 ]
 
 [workspace.package]
