@@ -59,6 +59,16 @@ function LogBrowser() {
               <p className="log-dir" title={list.dir}>
                 stored in {list.dir}
               </p>
+              {list.files.length > 0 && (
+                <a
+                  className="button-link"
+                  href="/api/logs/download.zip"
+                  download
+                  title="Download all saved logs as a ZIP; recordings include data written so far"
+                >
+                  Download all logs
+                </a>
+              )}
               {list.files.length === 0 ? (
                 <p className="muted">
                   No logs yet — hit ● Log while connected.

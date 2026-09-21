@@ -6,3 +6,4 @@ web/dist/
 tools/fake-ecu/bench-tune.json
 dist/
 logs/
+tmp/

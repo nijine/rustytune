@@ -20,7 +20,10 @@ enrichment, idle, fan, launch, boost, ...), drag points on every
 correction curve (WUE, dwell, IAT retard, idle targets, ...) with a live
 operating-point cursor, burn to EEPROM, and diff the
 ECU against a TunerStudio `.msq` — with selective apply and save. Recorded
-logs open in the built-in Log Viewer as synced strip charts. No ECU
+logs open in the built-in Log Viewer as synced strip charts. Use **Download
+all logs** in the Logs menu or Log Viewer to save every available `.msl`
+file in one ZIP. Active recordings include the data written so far; stop
+logging first for a complete recording. No ECU
 around? Open a `.msq` offline and edit it with the same table/settings UI,
 then save it back out.
 

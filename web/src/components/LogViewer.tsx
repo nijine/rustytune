@@ -242,6 +242,16 @@ export default function LogViewer() {
         >
           {importing ? "Importing…" : "Import…"}
         </button>
+        {files.length > 0 && (
+          <a
+            className="button-link"
+            href="/api/logs/download.zip"
+            download
+            title="Download all saved logs as a ZIP; recordings include data written so far"
+          >
+            Download all logs
+          </a>
+        )}
         <input
           ref={filePicker}
           type="file"

@@ -115,6 +115,7 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/log/start", post(api::log_start))
         .route("/api/log/stop", post(api::log_stop))
         .route("/api/logs", get(api::logs))
+        .route("/api/logs/download.zip", get(api::logs_download))
         // Imports can be big (long TunerStudio sessions), hence the raised
         // body limit on this route.
         .route(
