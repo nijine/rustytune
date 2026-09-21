@@ -472,6 +472,70 @@ pub async fn logs(State(state): State<SharedState>) -> Response {
     }
 }
 
+/// Build on disk, then stream the archive so memory use stays bounded.
+/// Open each log at its current length, including an active recording.
+fn logs_archive(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::io::{Read, Seek};
+
+    let mut archive = zip::ZipWriter::new(tempfile::tempfile()?);
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => Some(entries),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    if let Some(entries) = entries {
+        for entry in entries {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            // Never include directories, symlinks, or path-shaped names.
+            if !name.ends_with(".msl")
+                || name.contains(['/', '\\'])
+                || name.contains("..")
+                || !entry.file_type()?.is_file()
+            {
+                continue;
+            }
+            let file = std::fs::File::open(entry.path())?;
+            let size = file.metadata()?.len();
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .large_file(size >= u32::MAX as u64);
+            archive.start_file(name, options)?;
+            // A recording may keep growing while the archive is built.
+            std::io::copy(&mut file.take(size), &mut archive)?;
+        }
+    }
+    let mut file = archive.finish()?;
+    file.rewind()?;
+    Ok(file)
+}
+
+pub async fn logs_download(State(state): State<SharedState>) -> Response {
+    let dir = state.log_dir.clone();
+    match tokio::task::spawn_blocking(move || logs_archive(&dir)).await {
+        Ok(Ok(file)) => {
+            let stream = tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
+            (
+                [
+                    (header::CONTENT_TYPE, "application/zip"),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        "attachment; filename=\"rustytune-logs.zip\"",
+                    ),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                axum::body::Body::from_stream(stream),
+            )
+                .into_response()
+        }
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 pub async fn log_download(State(state): State<SharedState>, Path(name): Path<String>) -> Response {
     // Names come from our own listing; anything path-like is rejected.
     if name.contains('/') || name.contains('\\') || name.contains("..") || !name.ends_with(".msl") {
