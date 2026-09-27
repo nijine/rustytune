@@ -1710,7 +1710,7 @@ pub async fn msq_save(State(state): State<SharedState>) -> Response {
     let filename = format!("rustytune_{}.msq", now.format("%Y%m%d_%H%M%S"));
     (
         [
-            (header::CONTENT_TYPE, "application/xml".to_string()),
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
             (
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{filename}\""),
