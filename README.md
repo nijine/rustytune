@@ -149,3 +149,11 @@ available.
 The reference INI in `fixtures/` originates from the
 [Speeduino](https://speeduino.com) project and remains under
 Speeduino's own license; it is not part of rustytune's license grant.
+
+### Dashboard gauge selection
+
+Open **Choose gauges** on the Dashboard to select from all gauges defined in
+`[GaugeConfigurations]`. Use the up/down buttons to change dashboard order.
+Selections apply to both Dials and Tiles and are saved per browser, overriding
+the INI's `[FrontPage]` list. **Reset to defaults** restores the INI selection
+and order. The INI still supplies gauge channels, labels, units, and limits.
