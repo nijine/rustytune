@@ -27,6 +27,21 @@ logging first for a complete recording. No ECU
 around? Open a `.msq` offline and edit it with the same table/settings UI,
 then save it back out.
 
+AFR input calibration is available under **Settings → Tools → Calibrate AFR
+Sensor** while connected over primary USB serial. Read the ECU checksum to
+identify a known curve, select an AEM or other supported INI preset, or enter
+two voltage/AFR points using Custom Linear WB. Stop the engine before
+**Write to ECU**; rustytune verifies 0 RPM, sends the complete table, and checks
+the stored checksum. Calibration saves directly to EEPROM and does not need
+an additional Burn.
+
+Speeduino returns only a calibration checksum, not the full table. Unmatched
+curves appear as unknown/custom; this browser remembers successful custom
+writes and shows their points again when the live checksum matches. Calibration
+is separate from `.msq` files and cannot be edited offline. External `.inc`
+curves and thermistor calibration are not supported yet. Confirm the preset
+against the manual for your exact controller model.
+
 `make release` builds a single-file binary tarball for this machine;
 tagging `v*` builds macOS arm64 + Linux x86_64/arm64 release artifacts in
 CI (Linux arm64 covers the Raspberry Pi). Both local and tagged release builds

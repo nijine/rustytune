@@ -371,6 +371,14 @@ fn comms_roundtrip<R: Send + 'static>(
     state: &SharedState,
     make_cmd: impl FnOnce(mpsc::Sender<R>) -> Cmd,
 ) -> Result<R, ApiError> {
+    comms_roundtrip_timeout(state, make_cmd, Duration::from_secs(3))
+}
+
+fn comms_roundtrip_timeout<R: Send + 'static>(
+    state: &SharedState,
+    make_cmd: impl FnOnce(mpsc::Sender<R>) -> Cmd,
+    timeout: Duration,
+) -> Result<R, ApiError> {
     let comms = state.comms.lock().unwrap();
     let Some(handle) = comms.as_ref() else {
         return Err(err(StatusCode::CONFLICT, "not connected"));
@@ -381,7 +389,7 @@ fn comms_roundtrip<R: Send + 'static>(
         .send(make_cmd(reply_tx))
         .map_err(|_| err(StatusCode::CONFLICT, "comms thread gone"))?;
     drop(comms);
-    reply_rx.recv_timeout(Duration::from_secs(3)).map_err(|_| {
+    reply_rx.recv_timeout(timeout).map_err(|_| {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "comms thread not responding",
@@ -1168,7 +1176,9 @@ fn menu_entry_json(
     tune: &Tune,
     e: &ts_ini::MenuEntry,
 ) -> Option<serde_json::Value> {
-    let kind = if state.def.dialogs.contains_key(&e.target) {
+    let kind = if e.target == "std_ms2geno2" && crate::calibration::metadata(&state.def).is_ok() {
+        "calibration"
+    } else if state.def.dialogs.contains_key(&e.target) {
         "dialog"
     } else if state.def.tables.contains_key(&e.target) {
         "table"
@@ -1732,6 +1742,67 @@ pub async fn tune_burn(State(state): State<SharedState>, headers: HeaderMap) -> 
         Ok(Ok(Ok(pages))) => Json(serde_json::json!({ "burnedPages": pages })).into_response(),
         Ok(Ok(Err(msg))) => err(StatusCode::INTERNAL_SERVER_ERROR, msg).into_response(),
         Ok(Err(resp)) => resp.into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+fn calibration_json(def: &ts_ini::IniDef, crc: u32) -> serde_json::Value {
+    let presets = crate::calibration::presets(def);
+    let matching: Vec<&str> = presets
+        .iter()
+        .filter(|(_, table)| crc32fast::hash(table) == crc)
+        .map(|(p, _)| p.name.as_str())
+        .collect();
+    serde_json::json!({"crc":format!("{crc:08X}"),"matchingPresets":matching,"presets":presets.iter().map(|(p,_)|p).collect::<Vec<_>>()})
+}
+pub async fn afr_calibration(State(state): State<SharedState>) -> Response {
+    if let Err(e) = crate::calibration::metadata(&state.def) {
+        return err(StatusCode::BAD_REQUEST, e).into_response();
+    }
+    let def = state.def.clone();
+    match tokio::task::spawn_blocking(move || {
+        comms_roundtrip_timeout(
+            &state,
+            |reply| Cmd::Calibration { data: None, reply },
+            Duration::from_secs(20),
+        )
+    })
+    .await
+    {
+        Ok(Ok(Ok(crc))) => Json(calibration_json(&def, crc)).into_response(),
+        Ok(Ok(Err(e))) => err(StatusCode::CONFLICT, e).into_response(),
+        Ok(Err(e)) => e.into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+pub async fn afr_calibration_write(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(req): Json<crate::calibration::Linear>,
+) -> Response {
+    let data = match req.table(&state.def) {
+        Ok(data) => data,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    if let Err(e) = acquire_writer(&state, &headers) {
+        return e.into_response();
+    }
+    let def = state.def.clone();
+    match tokio::task::spawn_blocking(move || {
+        comms_roundtrip_timeout(
+            &state,
+            |reply| Cmd::Calibration {
+                data: Some(data),
+                reply,
+            },
+            Duration::from_secs(20),
+        )
+    })
+    .await
+    {
+        Ok(Ok(Ok(crc))) => Json(calibration_json(&def, crc)).into_response(),
+        Ok(Ok(Err(e))) => err(StatusCode::CONFLICT, e).into_response(),
+        Ok(Err(e)) => e.into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

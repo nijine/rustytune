@@ -92,6 +92,7 @@ pub fn parse_with_symbols(src: &str, symbols: &HashSet<String>) -> Result<IniDef
             "Datalog" => sections::datalog(lines, &mut ctx)?,
             "Menu" => sections::menu(lines, &mut ctx)?,
             "UserDefined" => sections::user_defined(lines, &mut ctx)?,
+            "ReferenceTables" => sections::reference_tables(lines, &mut ctx)?,
             // Known sections we deliberately skip in the MVP.
             _ => {}
         }

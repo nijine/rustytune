@@ -20,10 +20,10 @@ parsed-but-unused, or not surfaced in the UI.
 - **`[SettingContextHelp]`** (line 2138, 378 entries) — per-field help text.
   Only dialog-level `topicHelp` (a wiki URL) is served today
   (`crates/server/src/api.rs:1303`), so no field tooltips anywhere.
-- **`[ReferenceTables]`** (line 5848, 72 lines) — sensor calibration tables
-  (CLT/IAT thermistor, O2, MAP), plus `tableWriteCommand` and
-  `tableBlockingFactor`. There is no calibration support anywhere in the
-  server or `ecu-proto`; this is a whole missing feature, not a partial one.
+- **`[ReferenceTables]` thermistor calibration** — AFR metadata, linear
+  presets, custom two-point curves, checksum recognition, and ECU writes
+  are supported. CLT/IAT thermistor generators and external `.inc` files
+  still need support; nonlinear AFR presets requiring those files are omitted.
 - **`[LoggerDefinition]`** (line 5745, 67 lines) — tooth and composite trigger
   loggers (`H`/`h`/`J`/`j` commands, `recordDef`/`recordField`).
 - **`[ControllerCommands]`** (line 4541, 60 commands) — the `E\x..` command
@@ -76,15 +76,15 @@ calibrate, and reset surface, and it depends on `[ControllerCommands]` above.
 
 ## Menu targets that resolve to nothing
 
-21 menu/panel targets resolve to nothing servable. 13 are the `*Map` 3D views
-(intentionally unsupported, and documented as such). The remaining 8 are
+20 menu/panel targets resolve to nothing servable. 13 are the `*Map` 3D views
+(intentionally unsupported, and documented as such). The remaining 7 are
 real gaps:
 
 - `std_tpscal` — TPS calibration (orphans the `tpsMin` / `tpsMax` constants).
 - `std_ms3SdConsole` — onboard SD logging (orphans 10 `onboard_log_*`
   constants).
-- `std_ms2gentherm` / `std_ms2geno2` — thermistor and O2 calibration; these
-  need `[ReferenceTables]` above.
+- `std_ms2gentherm` — thermistor calibration; `std_ms2geno2` AFR
+  calibration is now served in Settings → Tools.
 - `std_ms3Rtc` — realtime clock setup.
 - `std_realtime`, `helpGeneral`, `protectIndicatorPanel`.
 

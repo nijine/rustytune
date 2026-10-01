@@ -197,7 +197,7 @@ export interface LogDataJson {
 }
 
 export interface MenuEntryJson {
-  type: "dialog" | "table" | "curve";
+  type: "dialog" | "table" | "curve" | "calibration";
   name: string;
   label: string;
   enabled: boolean;
@@ -375,6 +375,8 @@ export const api = {
   ) => post(`/api/tune/curve/${id}/points`, { points }),
   menus: () => request<MenuJson[]>("/api/tune/menus"),
   dialog: (name: string) => request<DialogJson>(`/api/tune/dialog/${name}`),
+  afrCalibration: () => request<AfrCalibrationJson>("/api/tune/afr-calibration"),
+  writeAfrCalibration: (curve: AfrCurve) => post<AfrCalibrationJson>("/api/tune/afr-calibration", curve),
   burn: () => post<{ burnedPages: number[] }>("/api/tune/burn"),
   msqUpload: (filename: string, content: string) =>
     post<MsqMeta>("/api/msq", { filename, content }),
@@ -389,3 +391,6 @@ export const api = {
       names: names ?? null,
     }),
 };
+
+export interface AfrCurve { voltsLow: number; afrLow: number; voltsHigh: number; afrHigh: number; preset?: string }
+export interface AfrCalibrationJson { crc: string; matchingPresets: string[]; presets: (AfrCurve & { name: string })[] }

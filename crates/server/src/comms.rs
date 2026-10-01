@@ -34,6 +34,10 @@ pub enum Cmd {
     Burn {
         reply: mpsc::Sender<Result<Vec<usize>, String>>,
     },
+    Calibration {
+        data: Option<Vec<u8>>,
+        reply: mpsc::Sender<Result<u32, String>>,
+    },
     Shutdown,
 }
 
@@ -387,6 +391,10 @@ fn run(
                     let _ = reply.send(summary);
                     broadcast_status(&ctx);
                 }
+                Cmd::Calibration { data, reply } => {
+                    let result = do_calibration(&mut session, &ctx, data);
+                    let _ = reply.send(result);
+                }
                 Cmd::Burn { reply } => {
                     let _ = reply.send(do_burn(&mut session, &ctx));
                     broadcast_tune(&ctx);
@@ -710,6 +718,45 @@ fn finish_log(ctx: &CommsCtx, log: &mut Option<MslWriter>) -> Option<LogSummary>
     };
     prune_logs(ctx);
     result
+}
+
+fn do_calibration(
+    session: &mut Session<SerialTransport>,
+    ctx: &CommsCtx,
+    data: Option<Vec<u8>>,
+) -> Result<u32, String> {
+    let cal = crate::calibration::metadata(&ctx.def)?;
+    if session.config().mode != ecu_proto::Mode::Primary {
+        return Err("Calibration requires primary USB serial".into());
+    }
+    let crc_template = ctx.def.header.table_crc_command.as_deref().unwrap();
+    if let Some(data) = data {
+        // Check the live ECU immediately before starting the indivisible transfer.
+        let block = session.read_realtime().map_err(|e| e.to_string())?;
+        let telemetry = Telemetry::new(&ctx.def, &block);
+        if !matches!(telemetry.channel("rpm"),Some(Value::Num(rpm)) if rpm == 0.0) {
+            return Err("Stop the engine before writing AFR calibration".into());
+        }
+        if !ctx.tune.lock().unwrap().loaded()
+            || ctx.status.lock().unwrap().ecu_signature.as_deref()
+                != Some(ctx.def.signature.as_str())
+        {
+            return Err("A loaded tune and matching ECU firmware signature are required".into());
+        }
+        ecu_proto::calibration::write(session,&cal.write_command,cal.identifier,cal.blocking_factor,&data)
+            .map_err(|e|format!("Calibration transfer failed; the ECU may have a partial calibration. Retry the complete write: {e}"))?;
+        let crc = ecu_proto::calibration::crc(session, crc_template, cal.identifier)
+            .map_err(|e| format!("Calibration was sent but checksum verification failed; read the calibration again before retrying: {e}"))?;
+        if crc != crc32fast::hash(&data) {
+            return Err(
+                "Calibration checksum verification failed; retry the complete write".into(),
+            );
+        }
+        Ok(crc)
+    } else {
+        ecu_proto::calibration::crc(session, crc_template, cal.identifier)
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(test)]

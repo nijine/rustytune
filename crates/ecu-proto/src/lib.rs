@@ -7,6 +7,7 @@
 //! ECU or in-memory pipes instead of real hardware. Command bytes are built
 //! from the INI's template strings, never hardcoded.
 
+pub mod calibration;
 pub mod command;
 pub mod envelope;
 pub mod pages;

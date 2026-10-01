@@ -5,6 +5,7 @@
 pub mod admin;
 pub mod api;
 pub mod auth;
+pub mod calibration;
 pub mod comms;
 pub mod config;
 pub mod definition;
@@ -136,6 +137,10 @@ pub fn app(state: SharedState) -> Router {
         .route("/api/tune/constants", get(api::tune_constants))
         .route("/api/tune/constant/{name}", post(api::tune_set_constant))
         .route("/api/tune/burn", post(api::tune_burn))
+        .route(
+            "/api/tune/afr-calibration",
+            get(api::afr_calibration).post(api::afr_calibration_write),
+        )
         .route("/api/offline", post(api::offline_open))
         .route("/api/offline/close", post(api::offline_close))
         .route("/api/msq", post(api::msq_upload))

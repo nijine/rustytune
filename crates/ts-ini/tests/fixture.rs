@@ -513,3 +513,29 @@ fn menus_and_dialogs_golden() {
 
     assert!(def.dialogs["idleSettings"].topic_help.is_some());
 }
+
+#[test]
+fn afr_reference_table_respects_firmware_profiles() {
+    for (symbols, block) in [
+        (&[][..], 256),
+        (&["mcu_stm32"][..], 64),
+        (&["COMMS_COMPAT"][..], 64),
+    ] {
+        let def = parse_with(symbols);
+        let c = def.afr_calibration.unwrap();
+        assert_eq!((c.identifier, c.adc_count, c.bytes_per_adc), (2, 1024, 1));
+        assert_eq!(c.scale, 10.0);
+        assert_eq!(c.blocking_factor, block);
+        assert_eq!(c.write_command, r"t\$tsCanId%2i%2o%2c%v");
+        assert!(
+            c.solutions
+                .iter()
+                .any(|(name, _)| name == "AEM Linear (30-2310 & 30-4900)")
+        );
+    }
+    assert!(ts_ini::parse("[ReferenceTables]\nadcCount =\n").is_ok());
+    assert!(
+        ts_ini::parse("[ReferenceTables]\nreferenceTable = std_ms2geno2, AFR\nadcCount =\n")
+            .is_err()
+    );
+}

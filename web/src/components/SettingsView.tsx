@@ -15,6 +15,7 @@ import {
 } from "../api";
 import type { TelemetryFeed } from "../feed";
 import CurveEditor from "./CurveEditor";
+import AfrCalibration from "./AfrCalibration";
 
 function ConstantRow({
   label,
@@ -329,7 +330,7 @@ function MenuEntryButton({
   selected: boolean;
   onSelect: (entry: MenuEntryJson) => void;
 }) {
-  if (entry.type !== "dialog" && entry.type !== "curve") return null;
+  if (entry.type !== "dialog" && entry.type !== "curve" && entry.type !== "calibration") return null;
   return (
     <button
       className={`menu-entry${selected ? " selected" : ""}`}
@@ -396,6 +397,7 @@ export default function SettingsView({
   const select = (entry: MenuEntryJson) => {
     setSelected(entry);
     setNotice(null);
+    setDialog(null);
     if (entry.type === "dialog") {
       loadDialog(entry.name);
     } else {
@@ -502,7 +504,9 @@ export default function SettingsView({
           {error && <span className="error">{error}</span>}
           {notice && <span className="warn-note">⚡ {notice}</span>}
         </div>
-        {selected?.type === "curve" ? (
+        {selected?.type === "calibration" ? (
+          <AfrCalibration offline={offline} feed={feed} />
+        ) : selected?.type === "curve" ? (
           <div className="dlg-body">
             <CurveEditor
               key={selected.name}
