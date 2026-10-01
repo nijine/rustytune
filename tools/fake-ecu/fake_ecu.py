@@ -65,6 +65,7 @@ SIGNATURE = b"speeduino 202501"       # 'Q' response, matches INI signature
 PRODUCT_STRING = b"Speeduino 2025.01"  # 'S' response
 BLOCKING_FACTOR = 251
 TABLE_BLOCKING_FACTOR = 256
+RPM_OVERRIDE = None
 
 RC_OK = 0x00
 RC_BURN_OK = 0x04
@@ -84,6 +85,8 @@ CMD_LENGTHS = {
     ord("S"): (1, 1),
     ord("C"): (1, 1),
     ord("f"): (1, 1),
+    ord("k"): (7, 7),
+    ord("t"): (8, 7 + TABLE_BLOCKING_FACTOR),
 }
 
 BAUD_CONSTANTS = {
@@ -111,10 +114,16 @@ class PageStore:
 
     def __init__(self, storage_path):
         self.storage_path = storage_path
+        self.calibration = bytearray(round((10 + i * 10 / 1023) * 10) for i in range(1024))
+        self.calibration_pending = bytearray(self.calibration)
+        self.calibration_offset = 0
         self.burned = {n: default_page(n) for n in range(1, len(PAGE_SIZES) + 1)}
         if storage_path and os.path.exists(storage_path):
             with open(storage_path) as f:
                 saved = json.load(f)
+            if len(saved.get("afrCalibration", "")) == 2048:
+                self.calibration = bytearray.fromhex(saved["afrCalibration"])
+                self.calibration_pending = bytearray(self.calibration)
             for key, hexdata in saved.get("pages", {}).items():
                 num = int(key)
                 data = bytearray.fromhex(hexdata)
@@ -143,8 +152,11 @@ class PageStore:
 
     def burn(self, page_num):
         self.burned[page_num] = bytearray(self.working[page_num])
+        self.persist()
+
+    def persist(self):
         if self.storage_path:
-            doc = {"pages": {str(n): p.hex() for n, p in self.burned.items()}}
+            doc = {"pages": {str(n): p.hex() for n, p in self.burned.items()}, "afrCalibration": self.calibration.hex()}
             tmp = self.storage_path + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(doc, f)
@@ -168,6 +180,8 @@ def build_payload(och_size, t, static):
         bat_raw = 139 + int(2 * math.sin(t * 0.3))
         adv = int(10 + sweep * 25)
 
+    if RPM_OVERRIDE is not None:
+        rpm = RPM_OVERRIDE
     payload = bytearray(och_size)
     struct.pack_into("<H", payload, OCH_OFFSETS["rpm"], rpm)
     struct.pack_into("<H", payload, OCH_OFFSETS["map"], mapv)
@@ -266,6 +280,25 @@ def dispatch(payload, store, och_size, t, static):
         store.burn(page_num)
         return rc_msg(RC_BURN_OK)
 
+    if cmd == b"k":
+        if payload[2] != 2:
+            return rc_msg(RC_RANGE_ERR)
+        return envelope(bytes([RC_OK]) + struct.pack(">I", zlib.crc32(store.calibration)))
+    if cmd == b"t":
+        offset, count = struct.unpack(">HH", payload[3:7])
+        if payload[2] != 2 or count != len(payload[7:]) or offset + count > 1024 or count % 32:
+            return rc_msg(RC_RANGE_ERR)
+        if offset == 0:
+            store.calibration_offset = 0
+        if offset != store.calibration_offset:
+            return rc_msg(RC_RANGE_ERR)
+        store.calibration_pending[offset:offset+count] = payload[7:]
+        store.calibration_offset += count
+        if store.calibration_offset == 1024:
+            store.calibration = bytearray(store.calibration_pending)
+            store.persist()
+        return rc_msg(RC_OK)
+
     if cmd == b"Q":
         return envelope(bytes([RC_OK]) + SIGNATURE)
     if cmd == b"S":
@@ -335,7 +368,10 @@ def main():
         help="corrupt one byte of every Nth response (primary mode: provokes "
              "CRC-mismatch drops; secondary mode: silently wrong values, as "
              "that protocol has no checksum)")
+    parser.add_argument("--rpm", type=int, help="override telemetry RPM (0 for calibration tests)")
     args = parser.parse_args()
+    global RPM_OVERRIDE
+    RPM_OVERRIDE = args.rpm
 
     store = PageStore(args.storage)
     fd, cleanup = open_port(args)

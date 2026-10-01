@@ -914,3 +914,60 @@ pub fn user_defined(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
     }
     Ok(())
 }
+
+pub fn reference_tables(lines: &[Line], ctx: &mut Ctx) -> Result<(), Error> {
+    let mut cal = AfrCalibration::default();
+    let mut active = false;
+    for line in lines {
+        let Some((key, tokens)) = kv(line, ctx) else {
+            continue;
+        };
+        match key {
+            "tableWriteCommand" => cal.write_command = str_tok(&tokens, 0, line.num)?,
+            "tableBlockingFactor" => {
+                cal.blocking_factor = tokens
+                    .first()
+                    .ok_or_else(|| Error::at(line.num, "missing calibration value"))?
+                    .number(line.num)? as usize
+            }
+            "referenceTable" => active = str_tok(&tokens, 0, line.num)? == "std_ms2geno2",
+            "tableIdentifier" if active => {
+                cal.identifier = tokens
+                    .first()
+                    .ok_or_else(|| Error::at(line.num, "missing calibration value"))?
+                    .number(line.num)? as u16
+            }
+            "adcCount" if active => {
+                cal.adc_count = tokens
+                    .first()
+                    .ok_or_else(|| Error::at(line.num, "missing calibration value"))?
+                    .number(line.num)? as usize
+            }
+            "bytesPerAdc" if active => {
+                cal.bytes_per_adc = tokens
+                    .first()
+                    .ok_or_else(|| Error::at(line.num, "missing calibration value"))?
+                    .number(line.num)? as usize
+            }
+            "scale" if active => {
+                cal.scale = tokens
+                    .first()
+                    .ok_or_else(|| Error::at(line.num, "missing calibration value"))?
+                    .number(line.num)?
+            }
+            "solution" if active => {
+                if let Some(Token::Expr(src)) = tokens.get(1)
+                    && !src.trim().is_empty()
+                {
+                    cal.solutions
+                        .push((str_tok(&tokens, 0, line.num)?, expr::parse(src, line.num)?));
+                }
+            }
+            _ => {}
+        }
+    }
+    if cal.adc_count > 0 {
+        ctx.def.afr_calibration = Some(cal);
+    }
+    Ok(())
+}

@@ -366,6 +366,7 @@ pub struct IniDef {
     pub datalog: Vec<DatalogEntry>,
     pub menus: Vec<MenuDef>,
     pub dialogs: IndexMap<String, DialogDef>,
+    pub afr_calibration: Option<AfrCalibration>,
     /// Non-fatal oddities encountered while parsing.
     pub warnings: Vec<String>,
 }
@@ -377,4 +378,16 @@ impl IniDef {
             .values()
             .filter(move |c| c.page == Some(page))
     }
+}
+
+/// AFR reference-table metadata after INI preprocessing.
+#[derive(Debug, Clone, Default)]
+pub struct AfrCalibration {
+    pub write_command: String,
+    pub blocking_factor: usize,
+    pub identifier: u16,
+    pub adc_count: usize,
+    pub bytes_per_adc: usize,
+    pub scale: f64,
+    pub solutions: Vec<(String, Expr)>,
 }
