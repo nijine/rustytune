@@ -26,6 +26,7 @@ export interface IndicatorUi {
 export interface Definition {
   signature: string;
   gauges: GaugeUi[];
+  availableGauges: GaugeUi[];
   indicators: IndicatorUi[];
 }
 

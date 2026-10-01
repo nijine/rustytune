@@ -5,6 +5,7 @@ import ConnectBar from "./components/ConnectBar";
 import ApplianceSettings from "./components/ApplianceSettings";
 import Gauge from "./components/Gauge";
 import GaugeTile from "./components/GaugeTile";
+import GaugeChooser from "./components/GaugeChooser";
 import Indicators from "./components/Indicators";
 import LogViewer from "./components/LogViewer";
 import SettingsView from "./components/SettingsView";
@@ -23,6 +24,7 @@ function Pairing({ onPaired }: { onPaired: () => void }) {
 interface DashPrefs {
   gauges: "dials" | "tiles";
   indicators: "all" | "active";
+  selectedGaugeNames: string[] | null;
 }
 
 const DASH_PREFS_KEY = "rustytune-dash-prefs";
@@ -34,9 +36,11 @@ function loadDashPrefs(): DashPrefs {
     return {
       gauges: p.gauges === "tiles" ? "tiles" : "dials",
       indicators: p.indicators === "active" ? "active" : "all",
+      selectedGaugeNames: Array.isArray(p.selectedGaugeNames) && p.selectedGaugeNames.every((name) => typeof name === "string")
+        ? [...new Set(p.selectedGaugeNames)] : null,
     };
   } catch {
-    return { gauges: "dials", indicators: "all" };
+    return { gauges: "dials", indicators: "all", selectedGaugeNames: null };
   }
 }
 
@@ -93,7 +97,7 @@ export default function App() {
   const updateDashPrefs = (patch: Partial<DashPrefs>) => {
     setDashPrefs((prev) => {
       const next = { ...prev, ...patch };
-      localStorage.setItem(DASH_PREFS_KEY, JSON.stringify(next));
+      try { localStorage.setItem(DASH_PREFS_KEY, JSON.stringify(next)); } catch { /* Keep preferences for this session when storage is unavailable. */ }
       return next;
     });
   };
@@ -114,6 +118,14 @@ export default function App() {
       feed.stop();
     };
   }, [feed]);
+
+  const availableGauges = definition?.availableGauges ?? definition?.gauges ?? [];
+  const visibleGauges = dashPrefs.selectedGaugeNames === null
+    ? definition?.gauges ?? []
+    : dashPrefs.selectedGaugeNames.flatMap((name) => {
+        const gauge = availableGauges.find((g) => g.name === name);
+        return gauge ? [gauge] : [];
+      });
 
   if(pairingRequired) return <Pairing onPaired={reload}/>;
   return (
@@ -164,6 +176,13 @@ export default function App() {
                   />
                 </label>
               </div>
+              <GaugeChooser
+                available={availableGauges}
+                selected={visibleGauges}
+                customized={dashPrefs.selectedGaugeNames !== null}
+                onChange={(selectedGaugeNames) => updateDashPrefs({ selectedGaugeNames })}
+              />
+              {visibleGauges.length === 0 && <p>No gauges selected. Open Choose gauges to add some.</p>}
               <Indicators
                 defs={definition.indicators}
                 feed={feed}
@@ -171,13 +190,13 @@ export default function App() {
               />
               {dashPrefs.gauges === "dials" ? (
                 <div className="gauges">
-                  {definition.gauges.map((g) => (
+                  {visibleGauges.map((g) => (
                     <Gauge key={g.name} def={g} feed={feed} />
                   ))}
                 </div>
               ) : (
                 <div className="gauge-tiles">
-                  {definition.gauges.map((g) => (
+                  {visibleGauges.map((g) => (
                     <GaugeTile key={g.name} def={g} feed={feed} />
                   ))}
                 </div>

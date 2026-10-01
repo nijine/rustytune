@@ -81,6 +81,7 @@ pub struct IndicatorUi {
 pub struct DefinitionUi {
     pub signature: String,
     pub gauges: Vec<GaugeUi>,
+    pub available_gauges: Vec<GaugeUi>,
     pub indicators: Vec<IndicatorUi>,
 }
 
@@ -147,6 +148,7 @@ pub fn definition_ui(def: &IniDef, defaults: &dyn SymbolSource) -> DefinitionUi 
     DefinitionUi {
         signature: def.signature.clone(),
         gauges,
+        available_gauges: def.gauges.values().map(|g| gauge_ui(g, defaults)).collect(),
         indicators,
     }
 }
@@ -167,6 +169,18 @@ mod tests {
 
         assert_eq!(ui.signature, "speeduino 202501");
         assert_eq!(ui.gauges.len(), 8, "fixture front page has 8 gauges");
+
+        assert_eq!(ui.available_gauges.len(), def.gauges.len());
+        assert!(ui.available_gauges.len() > ui.gauges.len());
+        for gauge in &ui.gauges {
+            let available = ui
+                .available_gauges
+                .iter()
+                .find(|g| g.name == gauge.name)
+                .unwrap();
+            assert_eq!(available.channel, gauge.channel);
+            assert_eq!(available.hi, gauge.hi);
+        }
 
         let tach = &ui.gauges[0];
         assert_eq!(tach.name, "tachometer");

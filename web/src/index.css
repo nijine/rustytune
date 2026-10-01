@@ -1297,3 +1297,23 @@ button.burn-needed {
 .log-recording {
   color: var(--critical, #d03b3b);
 }
+
+.gauge-chooser { margin: 16px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.gauge-chooser summary { cursor: pointer; }
+.gauge-chooser p, .gauge-chooser small { color: var(--muted); }
+.gauge-chooser small { display: block; font-size: 0.75rem; }
+.gauge-chooser h3 { font-size: 0.9rem; margin: 16px 0 8px; }
+.gauge-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; max-height: 320px; overflow-y: auto; margin-top: 12px; }
+.gauge-choices label { display: flex; align-items: center; gap: 8px; }
+.gauge-choices input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 18px;
+}
+.gauge-order { padding-left: 24px; max-height: 280px; overflow-y: auto; }
+.gauge-order li { padding: 4px 0; }
+.gauge-order li > span { display: inline-block; width: min(55%, 320px); vertical-align: middle; }
+.gauge-order button { margin-left: 6px; }
