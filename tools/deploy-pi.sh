@@ -2,13 +2,25 @@
 set -eu
 
 usage() {
-    echo "Usage: $0 [user@]hostname" >&2
+    echo "Usage: $0 [--pause] [user@]hostname" >&2
     echo "Build RustyTune for a 64-bit Pi with Docker and deploy it over SSH." >&2
+    echo "  --pause  Wait for Enter after building, before deploying to the Pi." >&2
     exit 2
 }
 
-[ "$#" -eq 1 ] || usage
-ssh_target=$1
+pause_before_deploy=false
+ssh_target=
+for argument in "$@"; do
+    case "$argument" in
+        --pause) pause_before_deploy=true ;;
+        -*) usage ;;
+        *)
+            [ -z "$ssh_target" ] || usage
+            ssh_target=$argument
+            ;;
+    esac
+done
+[ -n "$ssh_target" ] || usage
 
 # Keep the target from being interpreted as an ssh option or remote shell text.
 case "$ssh_target" in
@@ -42,6 +54,15 @@ artifact=$artifact_dir/rustytune
     exit 1
 }
 chmod 755 "$artifact"
+
+if [ "$pause_before_deploy" = true ]; then
+    printf 'Build complete. Press Enter to deploy to %s (Ctrl-C to cancel): ' "$ssh_target"
+    if ! IFS= read -r pause_response; then
+        echo "" >&2
+        echo "error: no confirmation received; deployment cancelled" >&2
+        exit 1
+    fi
+fi
 
 remote_artifact=/tmp/rustytune.deploy
 echo "Uploading binary to $ssh_target..."
