@@ -21,6 +21,17 @@ const PALETTE = [
 const DEFAULT_CHANNELS = ["RPM", "MAP", "AFR", "TPS", "CLT"];
 const STORE_KEY = "rustytune-log-channels";
 
+function formatFileSize(bytes: number): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  return `${unit === 0 ? size : size.toFixed(1)} ${units[unit]}`;
+}
+
 function loadChannelPrefs(): string[] | null {
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -230,7 +241,7 @@ export default function LogViewer() {
         >
           {files.map((f) => (
             <option key={f.name} value={f.name}>
-              {f.name}
+              {f.name} ({formatFileSize(f.size)})
               {f.active ? " (recording)" : ""}
             </option>
           ))}
