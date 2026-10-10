@@ -41,6 +41,7 @@ pub struct AppState {
     /// Symbols the INI was parsed with (recorded in saved .msq settings).
     pub symbols: Vec<String>,
     pub log_dir: PathBuf,
+    pub log_index: Mutex<Option<crate::log_view::Index>>,
     pub runtime: Arc<crate::config::RuntimeConfig>,
     pub auth: Arc<crate::auth::AuthState>,
 }
@@ -612,28 +613,29 @@ pub async fn log_import(
 
 /// Parsed .msl contents for the log viewer: column-major arrays (null =
 /// empty/non-numeric cell), ready for strip charts.
-pub async fn log_data(State(state): State<SharedState>, Path(name): Path<String>) -> Response {
+pub async fn log_data(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+    Query(query): Query<crate::log_view::Query>,
+) -> Response {
     if name.contains('/') || name.contains('\\') || name.contains("..") || !name.ends_with(".msl") {
         return err(StatusCode::BAD_REQUEST, "invalid log name").into_response();
     }
-    let path = state.log_dir.join(&name);
-    let parsed = tokio::task::spawn_blocking(move || {
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("{e}"))?;
-        datalog::read_msl(&text)
+    if query.start.is_some_and(|v| !v.is_finite())
+        || query.end.is_some_and(|v| !v.is_finite())
+        || matches!((query.start, query.end), (Some(a), Some(b)) if a > b)
+    {
+        return err(StatusCode::BAD_REQUEST, "invalid time range").into_response();
+    }
+    let result = tokio::task::spawn_blocking(move || {
+        let mut cache = state.log_index.lock().map_err(|e| e.to_string())?;
+        crate::log_view::load(&mut cache, state.log_dir.join(&name), name, query)
     })
     .await;
-    match parsed {
+    match result {
+        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Err(e)) => err(StatusCode::NOT_FOUND, e).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-        Ok(Err(msg)) => err(StatusCode::NOT_FOUND, format!("{name}: {msg}")).into_response(),
-        Ok(Ok(data)) => Json(serde_json::json!({
-            "name": name,
-            "title": data.title,
-            "labels": data.labels,
-            "units": data.units,
-            "rows": data.rows,
-            "columns": data.columns,
-        }))
-        .into_response(),
     }
 }
 

@@ -678,15 +678,32 @@ async fn browser_workflow() {
     let n_rows = log_data["rows"].as_u64().unwrap();
     assert!(n_rows > 0);
     let cols = log_data["columns"].as_array().unwrap();
-    assert_eq!(cols.len(), data_labels.len());
-    assert_eq!(cols[2].as_array().unwrap().len() as u64, n_rows);
-    assert_eq!(cols[2][0], 3450.0, "static fake-ECU RPM");
+    let column_labels = log_data["column_labels"].as_array().unwrap();
+    assert_eq!(cols.len(), column_labels.len());
+    assert!(
+        cols.len() < data_labels.len(),
+        "only selected channels are transferred"
+    );
+    let rpm = column_labels
+        .iter()
+        .position(|label| label == "RPM")
+        .unwrap();
+    assert_eq!(cols[rpm].as_array().unwrap().len() as u64, n_rows);
+    assert_eq!(cols[rpm][0], 3450.0, "static fake-ECU RPM");
+    assert_eq!(log_data["sampled"], false);
     let resp = http
         .get(format!("{base}/logs/..%2Fsecret.msl/data"))
         .send()
         .await
         .unwrap();
     assert_ne!(resp.status(), 200, "traversal must not be served");
+
+    let resp = http
+        .get(format!("{base}/logs/{log_name}/data?start=10&end=0"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
 
     // Importing an external .msl (e.g. a TunerStudio log) stores it in the
     // log dir; a second import of the same name gets a numeric suffix.
@@ -729,6 +746,21 @@ async fn browser_workflow() {
         .unwrap();
     assert_eq!(imported_data["labels"][1], "RPM");
     assert_eq!(imported_data["columns"][1][1], 950.0);
+    let zoomed: serde_json::Value = http
+        .get(format!(
+            "{base}/logs/imported_test.msl/data?channels=AFR&start=0.05&end=0.15"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(zoomed["column_labels"], serde_json::json!(["Time", "AFR"]));
+    assert_eq!(zoomed["visible_rows"], 1);
+    assert_eq!(zoomed["columns"], serde_json::json!([[0.1], [14.5]]));
+    assert_eq!(zoomed["range"], serde_json::json!([0.0, 0.1]));
+
     // Junk content and path-shaped names are rejected before writing.
     let resp = http
         .post(format!("{base}/logs/junk.msl"))

@@ -192,6 +192,10 @@ export interface LogDataJson {
   labels: string[];
   units: string[];
   rows: number;
+  visible_rows: number;
+  sampled: boolean;
+  range: [number, number] | null;
+  column_labels: string[];
   /// Column-major; null = empty/non-numeric cell.
   columns: (number | null)[][];
 }
@@ -347,8 +351,11 @@ export const api = {
   logStart: () => post("/api/log/start"),
   logStop: () => post("/api/log/stop"),
   logs: () => request<LogListJson>("/api/logs"),
-  logData: (name: string) =>
-    request<LogDataJson>(`/api/logs/${encodeURIComponent(name)}/data`),
+  logData: (name: string, channels: string[], range: [number, number] | null, points: number, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ channels: channels.join(","), points: String(points) });
+    if (range) { query.set("start", String(range[0])); query.set("end", String(range[1])); }
+    return request<LogDataJson>(`/api/logs/${encodeURIComponent(name)}/data?${query}`, { signal });
+  },
   logImport: (name: string, content: string) =>
     request<{ name: string; rows: number }>(
       `/api/logs/${encodeURIComponent(name)}`,

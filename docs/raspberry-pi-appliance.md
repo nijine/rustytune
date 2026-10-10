@@ -48,6 +48,20 @@ RustyTune reuses `/var/log/speeduino`; existing `.msl` logs are immediately
 visible and are not modified except when the configured retention limit requires
 oldest-first pruning. The active log is never a pruning candidate.
 
+## Log viewer cache
+
+The viewer builds a peak-preserving overview and a row-offset index in one pass
+on first opening a log. It saves them in `.rustytune-cache` inside the configured
+log directory, so unchanged logs can reopen without scanning the source again,
+including after restarting the server. File size and modification time invalidate
+stale indexes. Zoomed views with at most 5,000 valid timestamp rows contain every
+sample in that range; larger ranges use summaries.
+
+Cache files are disposable and are excluded from log listings and ZIP downloads.
+Corrupt caches are rebuilt, and viewing still works when the cache directory is
+unwritable. Overview caches for deleted logs are cleaned up during later cache
+writes. The source `.msl` files are not changed by indexing.
+
 ## Rollback
 
 Stop and disable `rustytune.service`, then enable and start
