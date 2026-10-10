@@ -35,6 +35,12 @@ async fn bulk_download_is_a_zip_of_regular_msl_files() {
         std::fs::write(log_dir.join(name), contents).unwrap();
     }
     std::fs::write(log_dir.join("config.txt"), "not a log").unwrap();
+    std::fs::create_dir(log_dir.join(".rustytune-cache")).unwrap();
+    std::fs::write(
+        log_dir.join(".rustytune-cache/first.msl.json"),
+        "cached index",
+    )
+    .unwrap();
     std::fs::create_dir(log_dir.join("directory.msl")).unwrap();
     #[cfg(unix)]
     {

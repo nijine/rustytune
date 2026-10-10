@@ -9,6 +9,7 @@ pub mod calibration;
 pub mod comms;
 pub mod config;
 pub mod definition;
+mod log_view;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -53,6 +54,7 @@ pub fn build_state_with_symbols(
     let (events, _) = broadcast::channel(64);
     let def = Arc::new(def);
     Arc::new(AppState {
+        log_index: Mutex::new(None),
         def: def.clone(),
         defaults,
         definition,

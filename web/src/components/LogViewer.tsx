@@ -30,8 +30,7 @@ function loadChannelPrefs(): string[] | null {
   }
 }
 
-/// One strip chart. Instances register into `charts` so cursor moves and
-/// x-zoom propagate to every sibling.
+// Cursor sync uses uPlot; shared range state keeps every strip at the same zoom.
 function Strip({
   x,
   y,
@@ -39,7 +38,8 @@ function Strip({
   unit,
   color,
   width,
-  charts,
+  range,
+  onZoom,
 }: {
   x: number[];
   y: (number | null)[];
@@ -47,17 +47,18 @@ function Strip({
   unit: string;
   color: string;
   width: number;
-  charts: React.MutableRefObject<Map<string, uPlot>>;
+  range: [number, number] | null;
+  onZoom: (range: [number, number] | null) => void;
 }) {
   const host = useRef<HTMLDivElement | null>(null);
-  const syncing = useRef(false);
 
   useEffect(() => {
     if (!host.current || width === 0) return;
+    let ready = false;
     const opts: uPlot.Options = {
       width,
       height: 150,
-      scales: { x: { time: false } },
+      scales: { x: { time: false, ...(range ? { min: range[0], max: range[1] } : {}) } },
       cursor: {
         sync: { key: "rustytune-log" },
         drag: { x: true, y: false },
@@ -88,25 +89,23 @@ function Strip({
       hooks: {
         setScale: [
           (u, key) => {
-            if (key !== "x" || syncing.current) return;
+            if (key !== "x" || !ready) return;
             const { min, max } = u.scales.x;
-            for (const other of charts.current.values()) {
-              if (other === u) continue;
-              syncing.current = true;
-              other.setScale("x", { min: min!, max: max! });
-              syncing.current = false;
-            }
+            if (min != null && max != null) onZoom([min, max]);
           },
         ],
       },
     };
     const chart = new uPlot(opts, [x, y] as uPlot.AlignedData, host.current);
-    charts.current.set(label, chart);
+    ready = true;
+    const reset = () => onZoom(null);
+    host.current.addEventListener("dblclick", reset);
+    const element = host.current;
     return () => {
-      charts.current.delete(label);
+      element.removeEventListener("dblclick", reset);
       chart.destroy();
     };
-  }, [x, y, label, unit, color, width, charts]);
+  }, [x, y, label, unit, color, width, range, onZoom]);
 
   return <div ref={host} className="log-strip" />;
 }
@@ -115,14 +114,15 @@ export default function LogViewer() {
   const [files, setFiles] = useState<LogFileJson[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [data, setData] = useState<LogDataJson | null>(null);
-  const [channels, setChannels] = useState<Set<string>>(new Set());
+  const [channels, setChannels] = useState<Set<string>>(new Set(loadChannelPrefs() ?? DEFAULT_CHANNELS));
+  const [range, setRange] = useState<[number, number] | null>(null);
+  const [reload, setReload] = useState(0);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [width, setWidth] = useState(0);
   const [importing, setImporting] = useState(false);
   const chartsArea = useRef<HTMLDivElement | null>(null);
-  const charts = useRef<Map<string, uPlot>>(new Map());
   const filePicker = useRef<HTMLInputElement | null>(null);
 
   const refreshFiles = useCallback(() => {
@@ -137,26 +137,30 @@ export default function LogViewer() {
 
   useEffect(refreshFiles, [refreshFiles]);
 
-  const open = useCallback((name: string) => {
-    setLoading(true);
-    setError(null);
-    api
-      .logData(name)
-      .then((d) => {
-        setData(d);
-        // Restore saved picks; fall back to common channels present.
-        const saved = loadChannelPrefs()?.filter((c) => d.labels.includes(c));
-        const defaults = DEFAULT_CHANNELS.filter((c) => d.labels.includes(c));
-        const pick = saved?.length ? saved : defaults;
-        setChannels(new Set(pick.length ? pick : d.labels.slice(1, 4)));
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
+  const onZoom = useCallback((next: [number, number] | null) => {
+    setRange((prev) => prev?.[0] === next?.[0] && prev?.[1] === next?.[1] ? prev : next);
   }, []);
 
   useEffect(() => {
-    if (selected) open(selected);
-  }, [selected, open]);
+    if (!selected) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      api.logData(selected, [...channels], range, 1500, controller.signal)
+        .then((d) => { if (!controller.signal.aborted) setData(d); })
+        .catch((e: Error) => { if (!controller.signal.aborted) setError(e.message); })
+        .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }, 150);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [selected, channels, range, reload]);
+
+  const selectFile = (name: string) => {
+    setData(null);
+    setRange(null);
+    setSelected(name);
+    setReload((r) => r + 1);
+  };
 
   // Copy an existing .msl (e.g. a TunerStudio log) into the server's log
   // dir, then open it.
@@ -168,7 +172,7 @@ export default function LogViewer() {
       .then((text) => api.logImport(file.name, text))
       .then((r) => {
         refreshFiles();
-        setSelected(r.name);
+        selectFile(r.name);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setImporting(false));
@@ -193,7 +197,7 @@ export default function LogViewer() {
     });
   };
 
-  // Time axis: rows whose time cell parsed; y columns follow that index.
+  // The response contains only requested columns, aligned on valid timestamps.
   const plot = useMemo(() => {
     if (!data) return null;
     const timeCol = data.columns[0] ?? [];
@@ -202,12 +206,12 @@ export default function LogViewer() {
       if (timeCol[i] !== null) keep.push(i);
     }
     const x = keep.map((i) => timeCol[i] as number);
-    const series = data.labels
+    const series = data.column_labels
       .map((label, ci) => ({ label, ci }))
       .filter(({ label, ci }) => ci > 0 && channels.has(label))
       .map(({ label, ci }, order) => ({
         label,
-        unit: data.units[ci] ?? "",
+        unit: data.units[data.labels.indexOf(label)] ?? "",
         color: PALETTE[order % PALETTE.length],
         y: keep.map((i) => data.columns[ci][i]),
       }));
@@ -221,7 +225,7 @@ export default function LogViewer() {
       <div className="tune-bar">
         <select
           value={selected ?? ""}
-          onChange={(e) => setSelected(e.target.value)}
+          onChange={(e) => selectFile(e.target.value)}
           aria-label="Log file"
         >
           {files.map((f) => (
@@ -267,14 +271,14 @@ export default function LogViewer() {
           <button
             className="ghost"
             disabled={loading}
-            onClick={() => open(selected)}
+            onClick={() => setReload((r) => r + 1)}
           >
             Reload
           </button>
         )}
         {data && (
           <span className="muted">
-            {data.rows} rows · drag to zoom · double-click to reset
+            {data.rows.toLocaleString()} rows · {data.sampled ? `${plot?.x.length.toLocaleString()} overview points` : `${data.visible_rows.toLocaleString()} full-detail rows`} · drag to zoom · double-click to reset
           </span>
         )}
         {loading && <span className="muted">loading…</span>}
@@ -327,7 +331,8 @@ export default function LogViewer() {
                   unit={s.unit}
                   color={s.color}
                   width={width}
-                  charts={charts}
+                  range={range ?? data.range}
+                  onZoom={onZoom}
                 />
               ))
             )}
