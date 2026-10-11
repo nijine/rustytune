@@ -1,5 +1,5 @@
 // Log viewer tab: pick a recorded .msl and read it as stacked uPlot strip
-// charts — one per channel, cursor and x-zoom synced across all of them.
+// charts with left/right scales, cursor and x-zoom synced across all of them.
 // Drag to zoom, double-click to reset. Channel picks persist per browser.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,31 +32,110 @@ function formatFileSize(bytes: number): string {
   return `${unit === 0 ? size : size.toFixed(1)} ${units[unit]}`;
 }
 
-function loadChannelPrefs(): string[] | null {
+type Side = "left" | "right";
+type Graph = { id: string; channels: { label: string; side: Side }[] };
+type PlotSeries = { label: string; unit: string; color: string; y: (number | null)[]; side: Side };
+const GRAPH_STORE_KEY = "rustytune-log-graphs";
+
+function loadGraphPrefs(): Graph[] {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : null;
-  } catch {
-    return null;
-  }
+    const raw = localStorage.getItem(GRAPH_STORE_KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.every((g) =>
+        g && typeof g.id === "string" && Array.isArray(g.channels) &&
+        g.channels.every((c: { label?: unknown; side?: unknown }) =>
+          c && typeof c.label === "string" && (c.side === "left" || c.side === "right"))
+      ) && new Set(parsed.map((g) => g.id)).size === parsed.length &&
+        parsed.every((g) => new Set(g.channels.map((c: { label: string }) => c.label)).size === g.channels.length)) return parsed;
+    }
+    const old = localStorage.getItem(STORE_KEY);
+    const labels: unknown = old ? JSON.parse(old) : DEFAULT_CHANNELS;
+    if (Array.isArray(labels) && labels.every((l) => typeof l === "string")) {
+      return [...new Set(labels)].map((label, i) => ({ id: String(i), channels: [{ label, side: "left" }] }));
+    }
+  } catch { /* Fall back to the default layout if preferences are unavailable. */ }
+  return DEFAULT_CHANNELS.map((label, i) => ({ id: String(i), channels: [{ label, side: "left" }] }));
+}
+
+function GraphChannelsDialog({ graph, number, data, onSave, onClose }: {
+  graph: Graph;
+  number: number;
+  data: LogDataJson;
+  onSave: (channels: Graph["channels"]) => void;
+  onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement | null>(null);
+  const [draft, setDraft] = useState(graph.channels);
+  const [filter, setFilter] = useState("");
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => { element?.close(); };
+  }, []);
+
+  const unitOf = (label: string) => data.units[data.labels.indexOf(label)] ?? "";
+  const toggle = (label: string) => setDraft((prev) => {
+    if (prev.some((c) => c.label === label)) return prev.filter((c) => c.label !== label);
+    const matching = unitOf(label) ? prev.find((c) => unitOf(c.label) === unitOf(label)) : undefined;
+    const side = matching?.side ?? (prev.some((c) => c.side === "left") ? "right" : "left");
+    return [...prev, { label, side }];
+  });
+  // Include saved channels absent from this file so they can still be removed.
+  const labels = [...new Set([...data.labels.slice(1), ...draft.map((c) => c.label)])];
+  const shown = labels.filter((label) => label.toLowerCase().includes(filter.trim().toLowerCase()));
+
+  return <dialog ref={dialog} className="log-channel-dialog" aria-labelledby="log-channel-dialog-title"
+    onCancel={onClose} onClose={onClose}
+    onClick={(e) => {
+      if (e.target !== e.currentTarget) return;
+      const bounds = e.currentTarget.getBoundingClientRect();
+      if (e.clientX < bounds.left || e.clientX > bounds.right || e.clientY < bounds.top || e.clientY > bounds.bottom) onClose();
+    }}>
+    <div className="log-channel-dialog-header">
+      <h3 id="log-channel-dialog-title">Graph {number} channels</h3>
+      <button className="ghost" onClick={onClose} aria-label="Close channel picker">×</button>
+    </div>
+    <p className="muted">Select channels and choose their axis. Left and right scales adjust independently; put comparable units on the same axis.</p>
+    <input autoFocus type="search" aria-label="Filter channels" placeholder="Filter channels…"
+      value={filter} onChange={(e) => setFilter(e.target.value)} />
+    <div className="log-channel-dialog-list">
+      {shown.map((label) => {
+        const channel = draft.find((c) => c.label === label);
+        const available = data.labels.includes(label);
+        return <div key={label} className="log-channel-row">
+          <label>
+            <input type="checkbox" checked={!!channel} onChange={() => toggle(label)} />
+            <span>{label}{unitOf(label) && <span className="muted"> ({unitOf(label)})</span>}
+              {!available && <span className="muted"> · unavailable in this log</span>}</span>
+          </label>
+          <select aria-label={`Axis for ${label}`} disabled={!channel} value={channel?.side ?? "left"}
+            onChange={(e) => setDraft((prev) => prev.map((c) => c.label === label ? { ...c, side: e.target.value as Side } : c))}>
+            <option value="left">Left axis</option>
+            <option value="right">Right axis</option>
+          </select>
+        </div>;
+      })}
+      {shown.length === 0 && <p className="muted center-note">No channels match your filter.</p>}
+    </div>
+    <div className="log-channel-dialog-actions">
+      <span className="muted">{draft.length} selected</span>
+      <button className="ghost" onClick={onClose}>Cancel</button>
+      <button onClick={() => { onSave(draft); onClose(); }}>Apply</button>
+    </div>
+  </dialog>;
 }
 
 // Cursor sync uses uPlot; shared range state keeps every strip at the same zoom.
 function Strip({
   x,
-  y,
-  label,
-  unit,
-  color,
+  series,
   width,
   range,
   onZoom,
 }: {
   x: number[];
-  y: (number | null)[];
-  label: string;
-  unit: string;
-  color: string;
+  series: PlotSeries[];
   width: number;
   range: [number, number] | null;
   onZoom: (range: [number, number] | null) => void;
@@ -68,21 +147,26 @@ function Strip({
     let ready = false;
     const opts: uPlot.Options = {
       width,
-      height: 150,
-      scales: { x: { time: false, ...(range ? { min: range[0], max: range[1] } : {}) } },
+      height: 200,
+      scales: {
+        x: { time: false, ...(range ? { min: range[0], max: range[1] } : {}) },
+        left: { auto: true },
+        right: { auto: true },
+      },
       cursor: {
         sync: { key: "rustytune-log" },
         drag: { x: true, y: false },
       },
       series: [
         { label: "Time (s)", value: (_u, v) => (v === null ? "–" : v.toFixed(2)) },
-        {
-          label: unit ? `${label} (${unit})` : label,
-          stroke: color,
+        ...series.map((s) => ({
+          label: s.unit ? `${s.label} (${s.unit})` : s.label,
+          scale: s.side,
+          stroke: s.color,
           width: 1.5,
           points: { show: false },
-          value: (_u, v) => (v === null || v === undefined ? "–" : String(v)),
-        },
+          value: (_u: uPlot, v: number | null) => (v == null ? "–" : String(v)),
+        })),
       ],
       axes: [
         {
@@ -90,12 +174,15 @@ function Strip({
           grid: { stroke: "#2c2c2a", width: 1 },
           ticks: { stroke: "#2c2c2a" },
         },
-        {
+        ...(["left", "right"] as const).map((side): uPlot.Axis => ({
+          scale: side,
+          side: side === "left" ? 3 : 1,
+          show: series.some((s) => s.side === side),
           stroke: "#898781",
-          grid: { stroke: "#2c2c2a", width: 1 },
+          grid: { show: side === "left", stroke: "#2c2c2a", width: 1 },
           ticks: { stroke: "#2c2c2a" },
-          size: 56,
-        },
+          size: 64,
+        })),
       ],
       hooks: {
         setScale: [
@@ -107,7 +194,7 @@ function Strip({
         ],
       },
     };
-    const chart = new uPlot(opts, [x, y] as uPlot.AlignedData, host.current);
+    const chart = new uPlot(opts, [x, ...series.map((s) => s.y)] as uPlot.AlignedData, host.current);
     ready = true;
     const reset = () => onZoom(null);
     host.current.addEventListener("dblclick", reset);
@@ -116,7 +203,7 @@ function Strip({
       element.removeEventListener("dblclick", reset);
       chart.destroy();
     };
-  }, [x, y, label, unit, color, width, range, onZoom]);
+  }, [x, series, width, range, onZoom]);
 
   return <div ref={host} className="log-strip" />;
 }
@@ -125,10 +212,14 @@ export default function LogViewer() {
   const [files, setFiles] = useState<LogFileJson[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [data, setData] = useState<LogDataJson | null>(null);
-  const [channels, setChannels] = useState<Set<string>>(new Set(loadChannelPrefs() ?? DEFAULT_CHANNELS));
+  const [graphs, setGraphs] = useState<Graph[]>(loadGraphPrefs);
+  const channels = useMemo(() => new Set(graphs.flatMap((g) => g.channels.map((c) => c.label))), [graphs]);
+  useEffect(() => {
+    try { localStorage.setItem(GRAPH_STORE_KEY, JSON.stringify(graphs)); } catch { /* Storage may be disabled. */ }
+  }, [graphs]);
   const [range, setRange] = useState<[number, number] | null>(null);
   const [reload, setReload] = useState(0);
-  const [filter, setFilter] = useState("");
+  const [editingGraph, setEditingGraph] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [width, setWidth] = useState(0);
@@ -167,6 +258,7 @@ export default function LogViewer() {
   }, [selected, channels, range, reload]);
 
   const selectFile = (name: string) => {
+    setEditingGraph(null);
     setData(null);
     setRange(null);
     setSelected(name);
@@ -198,14 +290,10 @@ export default function LogViewer() {
     return () => window.removeEventListener("resize", measure);
   }, [data]);
 
-  const toggle = (label: string) => {
-    setChannels((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      localStorage.setItem(STORE_KEY, JSON.stringify([...next]));
-      return next;
-    });
+  const addGraph = () => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setGraphs((prev) => [...prev, { id, channels: [] }]);
+    setEditingGraph(id);
   };
 
   // The response contains only requested columns, aligned on valid timestamps.
@@ -229,7 +317,7 @@ export default function LogViewer() {
     return { x, series };
   }, [data, channels]);
 
-  const shownFilter = filter.trim().toLowerCase();
+  const activeGraph = graphs.find((g) => g.id === editingGraph);
 
   return (
     <div className="log-viewer">
@@ -304,52 +392,41 @@ export default function LogViewer() {
       )}
 
       {data && plot && (
-        <div className="log-layout">
-          <aside className="log-channels">
-            <input
-              placeholder="filter channels…"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-            {data.labels.slice(1).map((label) => {
-              if (shownFilter && !label.toLowerCase().includes(shownFilter)) {
-                return null;
-              }
-              return (
-                <label key={label} className="log-channel">
-                  <input
-                    type="checkbox"
-                    checked={channels.has(label)}
-                    onChange={() => toggle(label)}
-                  />
-                  {label}
-                </label>
-              );
-            })}
-          </aside>
-          <div className="log-charts" ref={chartsArea}>
-            {plot.series.length === 0 ? (
-              <p className="muted center-note">
-                Pick channels on the left to plot them.
-              </p>
-            ) : (
-              plot.series.map((s) => (
-                <Strip
-                  key={`${data.name}:${s.label}`}
-                  x={plot.x}
-                  y={s.y}
-                  label={s.label}
-                  unit={s.unit}
-                  color={s.color}
-                  width={width}
-                  range={range ?? data.range}
-                  onZoom={onZoom}
-                />
-              ))
-            )}
-          </div>
+        <div className="log-charts" ref={chartsArea}>
+          <button className="ghost" onClick={addGraph}>Add graph</button>
+          {graphs.length === 0 && <p className="muted center-note">Add a graph to start plotting channels.</p>}
+          {graphs.map((graph, i) => {
+            const series = graph.channels.flatMap((c) => {
+              const s = plot.series.find((s) => s.label === c.label);
+              return s ? [{ ...s, side: c.side }] : [];
+            });
+            return <section key={`${data.name}:${graph.id}`} className="log-graph">
+              {series.length ? <>
+                <div className="log-scale-labels">
+                  {(["left", "right"] as const).map((side) => <span key={side}>
+                    {series.filter((s) => s.side === side).map((s, i) =>
+                      <span key={s.label}>{i > 0 && " · "}<span style={{ color: s.color }}>{s.label}{s.unit ? ` (${s.unit})` : ""}</span></span>)}
+                  </span>)}
+                </div>
+                <Strip x={plot.x} series={series} width={Math.max(0, width - 18)} range={range ?? data.range} onZoom={onZoom} />
+              </> : <p className="muted center-note">Use Channels to choose what to show in this graph.</p>}
+              <div className="log-graph-footer">
+                <strong>Graph {i + 1}</strong>
+                <div className="log-graph-actions">
+                  <button className="ghost" onClick={() => setEditingGraph(graph.id)}
+                    aria-label={`Choose channels for graph ${i + 1}`}>Channels</button>
+                  <button className="ghost" onClick={() => setGraphs((prev) => prev.filter((g) => g.id !== graph.id))}
+                    aria-label={`Remove graph ${i + 1}`}>Remove</button>
+                </div>
+              </div>
+            </section>;
+          })}
         </div>
       )}
+      {data && activeGraph && <GraphChannelsDialog key={`${data.name}:${activeGraph.id}`}
+        graph={activeGraph} number={graphs.indexOf(activeGraph) + 1} data={data}
+        onSave={(channels) => setGraphs((prev) => prev.map((g) => g.id === activeGraph.id ? { ...g, channels } : g))}
+        onClose={() => setEditingGraph(null)} />}
     </div>
   );
 }
