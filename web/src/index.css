@@ -42,8 +42,6 @@ body {
   .layout-auto .tab { flex:0 0 auto; }
   .layout-auto .gauges { grid-template-columns:1fr; }
   .layout-auto .gauge-tiles { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .layout-auto .log-layout { display:block; }
-  .layout-auto .log-channels { max-height:180px; margin-bottom:10px; }
   .layout-auto .log-panel { position:fixed; left:10px; right:10px; min-width:0; }
   .layout-auto button, .layout-auto select, .layout-auto input { min-height:44px; }
   .layout-auto .dash-options { flex-direction:column; align-items:flex-end; }
@@ -1148,51 +1146,6 @@ button.burn-needed {
   padding-top: 12px;
 }
 
-.log-layout {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.log-channels {
-  flex: 0 0 215px;
-  max-height: 70vh;
-  overflow-y: auto;
-  overflow-x: hidden;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.log-channels > input {
-  width: 100%;
-  margin-bottom: 8px;
-  font-size: 0.8rem;
-}
-
-.log-channel {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.8rem;
-  color: var(--secondary);
-  padding: 2px 2px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-/* The global `input { width: 180px }` would stretch the checkboxes and
-   push the labels out of the panel. */
-.log-channel input {
-  width: auto;
-  margin: 0;
-  flex: none;
-}
-
 .log-charts {
   flex: 1;
   min-width: 0;
@@ -1202,10 +1155,7 @@ button.burn-needed {
 }
 
 .log-strip {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 8px 2px;
+  min-width: 0;
 }
 
 /* uPlot dark-theme overrides */
@@ -1317,3 +1267,35 @@ button.burn-needed {
 .gauge-order li { padding: 4px 0; }
 .gauge-order li > span { display: inline-block; width: min(55%, 320px); vertical-align: middle; }
 .gauge-order button { margin-left: 6px; }
+
+/* Log graph controls and channel dialog. */
+.log-graph { min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px 2px; }
+.log-graph-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 4px; font-size: 0.8rem; }
+.log-scale-labels { display: flex; justify-content: space-between; gap: 16px; padding: 4px 8px; font-size: 0.75rem; }
+.log-scale-labels > span { flex: 1; }
+.log-scale-labels > span:last-child { text-align: right; }
+.log-strip .u-legend { white-space: normal; }
+
+.log-graph-actions { display: flex; gap: 8px; }
+.log-channel-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 20px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.log-channel-dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
+.log-channel-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.log-channel-dialog-header h3 { margin: 0; }
+.log-channel-dialog > p { font-size: 0.8rem; }
+.log-channel-dialog > input { width: 100%; margin-bottom: 12px; }
+.log-channel-dialog-list { max-height: min(50dvh, 420px); overflow-y: auto; }
+.log-channel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.log-channel-row label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 0.85rem; cursor: pointer; }
+.log-channel-row label > span { overflow-wrap: anywhere; }
+.log-channel-row input { width: auto; margin: 0; flex: none; }
+.log-channel-row select { width: 110px; flex: none; font-size: 0.8rem; }
+.log-channel-dialog-actions { display: flex; align-items: center; gap: 8px; padding-top: 16px; }
+.log-channel-dialog-actions > span { margin-right: auto; font-size: 0.8rem; }
